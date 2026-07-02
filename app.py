@@ -29,7 +29,7 @@ STEP_FINISHED_PAUSE_SEC = float(os.getenv("STEP_FINISHED_PAUSE_SEC", "0.25"))
 st.set_page_config(
     page_title="LangGraph Transparent Chat",
     page_icon="🔍",
-    layout="wide",
+    layout="centered",
     initial_sidebar_state="expanded",
 )
 
@@ -264,6 +264,12 @@ def render_debug_summary(
     active_node: str | None = None,
 ):
     """Under the Hood panel: tokens, live state, and step-by-step trace."""
+    if status == "Graph complete":
+        st.markdown(
+            '<div class="under-hood-complete-marker" aria-hidden="true"></div>',
+            unsafe_allow_html=True,
+        )
+
     st.subheader("Under the Hood")
     render_running_banner(status)
     if not status.startswith(("Starting", "Running")):
@@ -290,7 +296,7 @@ def render_debug_summary(
     render_json_expander(
         "Current state snapshot",
         state_view,
-        expanded=status.startswith(("Starting", "Running")),
+        expanded=False,
     )
 
     render_step_trace(trace_steps, active_node, status)

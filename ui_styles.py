@@ -2,7 +2,7 @@ import streamlit as st
 
 LAYOUT_CSS = """
 section.main > div.block-container {
-    max-width: 880px;
+    max-width: 680px;
     margin-left: auto;
     margin-right: auto;
     padding-left: 1.25rem;
@@ -46,6 +46,13 @@ section.main > div.block-container {
     border: none;
     border-top: 1px solid #e2e8f0;
     margin: 0 0 0.85rem 0;
+}
+div[data-testid="column"]:has(.under-hood-complete-marker) {
+    background-color: #f0fdf4;
+    border: 1px solid #dcfce7;
+    border-radius: 12px;
+    padding: 0.5rem 0.75rem 0.75rem;
+    transition: background-color 0.45s ease, border-color 0.45s ease;
 }
 .node-badge {
     display: inline-block;
