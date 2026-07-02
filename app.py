@@ -1,3 +1,4 @@
+import html
 import json
 import os
 import uuid
@@ -40,6 +41,8 @@ st.markdown(
         font-weight: 600;
         font-size: 0.85rem;
         margin-right: 6px;
+        margin-bottom: 4px;
+        white-space: nowrap;
     }
     .trace-card {
         border-left: 4px solid #6366f1;
@@ -47,6 +50,43 @@ st.markdown(
         margin-bottom: 0.75rem;
         background: #f8fafc;
         border-radius: 0 8px 8px 0;
+    }
+    .ai-flow-banner {
+        background: #fff7ed;
+        border: 1px solid #fdba74;
+        color: #9a3412;
+        padding: 0.55rem 0.8rem;
+        border-radius: 8px;
+        font-weight: 600;
+        margin: 0.4rem 0 0.8rem 0;
+    }
+    .visit-flow-wrap {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.35rem;
+        margin: 0.25rem 0 0.75rem 0;
+    }
+    .visit-arrow {
+        color: #64748b;
+        font-weight: 700;
+        padding: 0 0.15rem;
+    }
+    .json-block {
+        background: #0f172a;
+        color: #e2e8f0;
+        border-radius: 8px;
+        padding: 0.75rem 0.9rem;
+        font-size: 0.82rem;
+        line-height: 1.45;
+        overflow-x: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        margin-bottom: 0.75rem;
+    }
+    .json-label {
+        font-weight: 600;
+        margin: 0.35rem 0 0.25rem 0;
     }
     .live-pulse {
         animation: pulse 1.2s ease-in-out infinite;
@@ -64,6 +104,20 @@ st.markdown(
     @keyframes visit-order-glow {
         0%, 100% { background: transparent; }
         50% { background: #eef2ff; border-radius: 8px; }
+    }
+    .desktop-hood {
+        display: block;
+    }
+    .mobile-hood {
+        display: none;
+    }
+    @media (max-width: 900px) {
+        .desktop-hood {
+            display: none;
+        }
+        .mobile-hood {
+            display: block;
+        }
     }
     </style>
     """,
@@ -84,6 +138,8 @@ def init_session():
             "status": "Idle — waiting for your message.",
             "active_node": None,
         }
+    if "mobile_hood_open" not in st.session_state:
+        st.session_state.mobile_hood_open = False
 
 
 def badge(node: str, active: bool = False) -> str:
@@ -114,6 +170,31 @@ def scroll_to_visit_order(highlight: bool = False):
     )
 
 
+def render_json_block(label: str, data: dict):
+    """Full-width JSON block with wrapping (no cramped side-by-side columns)."""
+    st.markdown(f'<div class="json-label">{label}</div>', unsafe_allow_html=True)
+    payload = html.escape(json.dumps(data, indent=2, ensure_ascii=False))
+    st.markdown(f'<pre class="json-block">{payload}</pre>', unsafe_allow_html=True)
+
+
+def render_visit_order(visited: list[str]):
+    """Render visit path as wrapping badges instead of one long horizontal line."""
+    if not visited:
+        st.write("—")
+        return
+
+    parts = []
+    for index, node in enumerate(visited):
+        parts.append(badge(node))
+        if index < len(visited) - 1:
+            parts.append('<span class="visit-arrow">→</span>')
+
+    st.markdown(
+        f'<div class="visit-flow-wrap">{"".join(parts)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
 def summarize_tokens(trace_steps: list[dict]) -> dict[str, int]:
     totals = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
     for step in trace_steps:
@@ -140,10 +221,17 @@ def render_trace_step(step: dict, step_num: int, active: bool = False):
         chosen = output.get("chosen_route", "?")
         ai = output.get("ai_decision", False)
 
+        if ai:
+            st.markdown(
+                '<div class="ai-flow-banner">AI decided the flow → '
+                f'<code>{chosen}</code></div>',
+                unsafe_allow_html=True,
+            )
+
         st.caption(
-            f"Allowed edges: `{', '.join(allowed)}`  →  "
-            f"**Chosen:** `{chosen}` "
-            f"({'AI decision' if ai else 'only option'})"
+            f"Allowed edges: `{', '.join(allowed)}` · "
+            f"Chosen: `{chosen}` · "
+            f"{'AI decision' if ai else 'Only valid option'}"
         )
     else:
         st.caption(f"Worker node: `{node}`")
@@ -156,13 +244,8 @@ def render_trace_step(step: dict, step_num: int, active: bool = False):
         f"total: `{usage.get('total_tokens', 0)}`"
     )
 
-    col_in, col_out = st.columns(2)
-    with col_in:
-        st.markdown("**Input (state read)**")
-        st.json(step.get("input", {}))
-    with col_out:
-        st.markdown("**Output (state written)**")
-        st.json(step.get("output", {}))
+    render_json_block("Input (state read)", step.get("input", {}))
+    render_json_block("Output (state written)", step.get("output", {}))
 
 
 def render_debug_panel(
@@ -191,8 +274,7 @@ def render_debug_panel(
     )
     st.markdown("**Visit order**")
     if visited:
-        path = " → ".join(visited)
-        st.code(path, language=None)
+        render_visit_order(visited)
     else:
         st.write("—")
 
@@ -212,7 +294,7 @@ def render_debug_panel(
         "reflected": running_state.get("reflected", False),
         "final_answer": running_state.get("final_answer", ""),
     }
-    st.json(state_view)
+    render_json_block("Current state snapshot", state_view)
 
     st.markdown("**Step-by-step trace**")
     if not trace_steps:
@@ -237,13 +319,27 @@ def save_debug(visited, trace_steps, running_state, status, active_node=None):
     }
 
 
-def run_chat_turn(prompt: str, chat_placeholder, debug_placeholder):
+def update_debug_panels(
+    debug_placeholder,
+    mobile_debug_placeholder,
+    visited,
+    trace_steps,
+    running_state,
+    status,
+    active_node=None,
+):
+    save_debug(visited, trace_steps, running_state, status, active_node)
+    with debug_placeholder.container():
+        render_debug_panel(visited, trace_steps, active_node, running_state, status)
+    with mobile_debug_placeholder.container():
+        render_debug_panel(visited, trace_steps, active_node, running_state, status)
+
+
+def run_chat_turn(prompt: str, chat_placeholder, debug_placeholder, mobile_debug_placeholder):
     st.session_state.messages.append({"role": "user", "content": prompt})
 
     with chat_placeholder.container():
-        for msg in st.session_state.messages:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
+        render_messages()
 
     visited: list[str] = []
     trace_steps: list[dict] = []
@@ -251,9 +347,15 @@ def run_chat_turn(prompt: str, chat_placeholder, debug_placeholder):
     active_node: str | None = None
     final_answer = ""
 
-    save_debug(visited, trace_steps, running_state, "Starting graph...")
-    with debug_placeholder.container():
-        render_debug_panel(visited, trace_steps, active_node, running_state, "Starting graph...")
+    update_debug_panels(
+        debug_placeholder,
+        mobile_debug_placeholder,
+        visited,
+        trace_steps,
+        running_state,
+        "Starting graph...",
+        active_node,
+    )
     scroll_to_visit_order(highlight=True)
 
     for event in stream_agent(prompt, thread_id=str(uuid.uuid4())):
@@ -261,9 +363,15 @@ def run_chat_turn(prompt: str, chat_placeholder, debug_placeholder):
             active_node = event["node"]
             running_state = event["state"]
             status = f"Running `{active_node}`..."
-            save_debug(visited, trace_steps, running_state, status, active_node)
-            with debug_placeholder.container():
-                render_debug_panel(visited, trace_steps, active_node, running_state, status)
+            update_debug_panels(
+                debug_placeholder,
+                mobile_debug_placeholder,
+                visited,
+                trace_steps,
+                running_state,
+                status,
+                active_node,
+            )
 
         elif event["type"] == "node_end":
             active_node = None
@@ -274,9 +382,15 @@ def run_chat_turn(prompt: str, chat_placeholder, debug_placeholder):
                 trace_steps.append(trace)
 
             status = f"Finished `{event['node']}`"
-            save_debug(visited, trace_steps, running_state, status, active_node)
-            with debug_placeholder.container():
-                render_debug_panel(visited, trace_steps, active_node, running_state, status)
+            update_debug_panels(
+                debug_placeholder,
+                mobile_debug_placeholder,
+                visited,
+                trace_steps,
+                running_state,
+                status,
+                active_node,
+            )
             if len(visited) == 1:
                 scroll_to_visit_order(highlight=True)
 
@@ -286,9 +400,15 @@ def run_chat_turn(prompt: str, chat_placeholder, debug_placeholder):
             trace_steps = running_state.get("execution_trace", trace_steps)
             final_answer = running_state.get("final_answer", "")
 
-            save_debug(visited, trace_steps, running_state, "Graph complete")
-            with debug_placeholder.container():
-                render_debug_panel(visited, trace_steps, None, running_state, "Graph complete")
+            update_debug_panels(
+                debug_placeholder,
+                mobile_debug_placeholder,
+                visited,
+                trace_steps,
+                running_state,
+                "Graph complete",
+                None,
+            )
 
     if not final_answer:
         final_answer = "Sorry — the graph did not produce a final answer."
@@ -305,35 +425,51 @@ def run_chat_turn(prompt: str, chat_placeholder, debug_placeholder):
     )
 
     with chat_placeholder.container():
-        for msg in st.session_state.messages:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
+        render_messages()
+
+
+def render_messages():
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
 
 
 def render_chat_page():
     st.title("LangGraph Transparent Chatbot")
     st.markdown(
         "Describe a simple life problem. Watch **every node**, **router decision**, "
-        "and **state change** live on the right."
+        "and **state change** live in Under the Hood."
     )
 
-    chat_col, debug_col = st.columns([1, 1], gap="large")
+    dbg = st.session_state.debug
 
-    with chat_col:
-        st.subheader("Chat")
-        chat_placeholder = st.empty()
-        with chat_placeholder.container():
-            for msg in st.session_state.messages:
-                with st.chat_message(msg["role"]):
-                    st.markdown(msg["content"])
+    st.subheader("Chat")
+    chat_placeholder = st.empty()
+    with chat_placeholder.container():
+        render_messages()
 
-        if not st.session_state.messages:
-            st.info("Try: *I keep forgetting to drink water during the day*")
+    if not st.session_state.messages:
+        st.info("Try: *I keep forgetting to drink water during the day*")
 
-    with debug_col:
-        debug_placeholder = st.empty()
-        dbg = st.session_state.debug
-        with debug_placeholder.container():
+    st.markdown('<div class="desktop-hood">', unsafe_allow_html=True)
+    debug_placeholder = st.empty()
+    with debug_placeholder.container():
+        render_debug_panel(
+            dbg["visited"],
+            dbg["trace_steps"],
+            dbg["active_node"],
+            dbg["running_state"],
+            dbg["status"],
+        )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown('<div class="mobile-hood">', unsafe_allow_html=True)
+    with st.expander(
+        "Under the Hood (tap to open)",
+        expanded=st.session_state.mobile_hood_open,
+    ):
+        mobile_debug_placeholder = st.empty()
+        with mobile_debug_placeholder.container():
             render_debug_panel(
                 dbg["visited"],
                 dbg["trace_steps"],
@@ -341,10 +477,18 @@ def render_chat_page():
                 dbg["running_state"],
                 dbg["status"],
             )
+    st.markdown("</div>", unsafe_allow_html=True)
 
     prompt = st.chat_input("Describe a simple life problem...")
     if prompt:
-        run_chat_turn(prompt, chat_placeholder, debug_placeholder)
+        st.session_state.mobile_hood_open = True
+        run_chat_turn(
+            prompt,
+            chat_placeholder,
+            debug_placeholder,
+            mobile_debug_placeholder,
+        )
+        st.rerun()
 
 
 def main():
