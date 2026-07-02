@@ -2,6 +2,7 @@ from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
 
 from state import AgentState
+from token_usage import extract_token_usage
 
 
 def create_llm():
@@ -15,6 +16,7 @@ def clarify_node(state: AgentState) -> dict:
         f"The user said: '{state['problem']}'\n"
         "Ask ONE short clarifying question to understand the real issue."
     )
+    token_usage = extract_token_usage(response)
     return {
         "messages": [AIMessage(content=f"[Clarify] {response.content}")],
         "execution_trace": [
@@ -23,6 +25,7 @@ def clarify_node(state: AgentState) -> dict:
                 "type": "worker",
                 "input": {"problem": state["problem"]},
                 "output": {"question": response.content},
+                "token_usage": token_usage,
             }
         ],
     }
@@ -36,6 +39,7 @@ def brainstorm_node(state: AgentState) -> dict:
         "List 3 to 5 simple, practical ideas. "
         "Return one idea per line, no numbering."
     )
+    token_usage = extract_token_usage(response)
     ideas = [line.strip("- ").strip() for line in response.content.splitlines() if line.strip()]
     return {
         "brainstormed_ideas": ideas,
@@ -46,6 +50,7 @@ def brainstorm_node(state: AgentState) -> dict:
                 "type": "worker",
                 "input": {"problem": state["problem"]},
                 "output": {"brainstormed_ideas": ideas},
+                "token_usage": token_usage,
             }
         ],
     }
@@ -59,6 +64,7 @@ def prioritize_node(state: AgentState) -> dict:
         f"Problem: {state['problem']}\n\nIdeas:\n{ideas}\n\n"
         "Pick the best 1-2 ideas for a busy person. One per line."
     )
+    token_usage = extract_token_usage(response)
     picked = [line.strip("- ").strip() for line in response.content.splitlines() if line.strip()]
     return {
         "prioritized_ideas": picked,
@@ -69,6 +75,7 @@ def prioritize_node(state: AgentState) -> dict:
                 "type": "worker",
                 "input": {"brainstormed_ideas": state["brainstormed_ideas"]},
                 "output": {"prioritized_ideas": picked},
+                "token_usage": token_usage,
             }
         ],
     }
@@ -84,6 +91,7 @@ def action_plan_node(state: AgentState) -> dict:
         "Write 3 small action steps the person can do today or this week. "
         "One step per line."
     )
+    token_usage = extract_token_usage(response)
     steps = [line.strip("- ").strip() for line in response.content.splitlines() if line.strip()]
     return {
         "action_steps": steps,
@@ -97,6 +105,7 @@ def action_plan_node(state: AgentState) -> dict:
                     "ideas": source,
                 },
                 "output": {"action_steps": steps},
+                "token_usage": token_usage,
             }
         ],
     }
@@ -111,6 +120,7 @@ def reflect_node(state: AgentState) -> dict:
         "In 2-3 short sentences, say if this plan is realistic. "
         "Suggest one tiny improvement if needed."
     )
+    token_usage = extract_token_usage(response)
     return {
         "messages": [AIMessage(content=f"[Reflect] {response.content}")],
         "reflected": True,
@@ -120,6 +130,7 @@ def reflect_node(state: AgentState) -> dict:
                 "type": "worker",
                 "input": {"action_steps": state["action_steps"]},
                 "output": {"reflection": response.content, "reflected": True},
+                "token_usage": token_usage,
             }
         ],
     }
@@ -134,6 +145,7 @@ def finalize_node(state: AgentState) -> dict:
         "Write a friendly final answer in under 120 words. "
         "Include the steps and one encouraging line."
     )
+    token_usage = extract_token_usage(response)
     return {
         "final_answer": response.content,
         "messages": [AIMessage(content=f"[Final Answer]\n{response.content}")],
@@ -143,6 +155,7 @@ def finalize_node(state: AgentState) -> dict:
                 "type": "worker",
                 "input": {"action_steps": state["action_steps"]},
                 "output": {"final_answer": response.content},
+                "token_usage": token_usage,
             }
         ],
     }

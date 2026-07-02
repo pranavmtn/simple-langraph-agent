@@ -2,6 +2,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from state import AgentState, Route
+from token_usage import extract_token_usage
 
 ROUTER_SYSTEM = """You are the orchestrator for a simple life-problem solver.
 
@@ -65,11 +66,11 @@ def allowed_routes(state: AgentState) -> list[Route]:
     return routes
 
 
-def decide_next_route(state: AgentState, llm=None) -> Route:
+def decide_next_route(state: AgentState, llm=None) -> tuple[Route, dict[str, int]]:
     """Ask the LLM which allowed node should run next."""
     options = allowed_routes(state)
     if len(options) == 1:
-        return options[0]
+        return options[0], {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
 
     llm = llm or create_router()
     context = f"""Problem: {state["problem"]}
@@ -94,19 +95,20 @@ ALLOWED next routes (pick one): {", ".join(options)}
             HumanMessage(content=context),
         ]
     )
+    token_usage = extract_token_usage(response)
 
     route = response.content.strip().lower().replace('"', "").replace("'", "")
     if route in options:
-        return route  # type: ignore[return-value]
+        return route, token_usage  # type: ignore[return-value]
 
-    return options[0]
+    return options[0], token_usage
 
 
 def router_node(state: AgentState) -> dict:
     """Orchestrator node: decide and record the next route."""
     options = allowed_routes(state)
+    chosen, token_usage = decide_next_route(state)
     ai_decision = len(options) > 1
-    chosen = decide_next_route(state) if ai_decision else options[0]
 
     return {
         "next_route": chosen,
@@ -126,6 +128,7 @@ def router_node(state: AgentState) -> dict:
                     "chosen_route": chosen,
                     "ai_decision": ai_decision,
                 },
+                "token_usage": token_usage,
             }
         ],
     }

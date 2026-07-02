@@ -4,8 +4,10 @@ import uuid
 from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
+from beginner_guide import render_beginner_guide
 from graph import stream_agent
 from router import NODE_COLORS, NODE_LABELS
 
@@ -53,6 +55,16 @@ st.markdown(
         0%, 100% { opacity: 1; }
         50% { opacity: 0.45; }
     }
+    #visit-order-section {
+        scroll-margin-top: 5rem;
+    }
+    .visit-order-highlight {
+        animation: visit-order-glow 1.2s ease-in-out 2;
+    }
+    @keyframes visit-order-glow {
+        0%, 100% { background: transparent; }
+        50% { background: #eef2ff; border-radius: 8px; }
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -83,6 +95,35 @@ def badge(node: str, active: bool = False) -> str:
     )
 
 
+def scroll_to_visit_order(highlight: bool = False):
+    """Smooth-scroll the main page to the Visit order section."""
+    highlight_class = "visit-order-highlight" if highlight else ""
+    components.html(
+        f"""
+        <script>
+            (function() {{
+                const doc = window.parent.document;
+                const el = doc.getElementById("visit-order-section");
+                if (!el) return;
+                el.classList.add("{highlight_class}");
+                el.scrollIntoView({{ behavior: "smooth", block: "start" }});
+            }})();
+        </script>
+        """,
+        height=0,
+    )
+
+
+def summarize_tokens(trace_steps: list[dict]) -> dict[str, int]:
+    totals = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    for step in trace_steps:
+        usage = step.get("token_usage", {}) or {}
+        totals["input_tokens"] += int(usage.get("input_tokens", 0) or 0)
+        totals["output_tokens"] += int(usage.get("output_tokens", 0) or 0)
+        totals["total_tokens"] += int(usage.get("total_tokens", 0) or 0)
+    return totals
+
+
 def render_trace_step(step: dict, step_num: int, active: bool = False):
     node = step.get("node", "unknown")
     color = NODE_COLORS.get(node, "#64748b")
@@ -106,6 +147,14 @@ def render_trace_step(step: dict, step_num: int, active: bool = False):
         )
     else:
         st.caption(f"Worker node: `{node}`")
+
+    usage = step.get("token_usage", {}) or {}
+    st.caption(
+        "Tokens — "
+        f"input: `{usage.get('input_tokens', 0)}`, "
+        f"output: `{usage.get('output_tokens', 0)}`, "
+        f"total: `{usage.get('total_tokens', 0)}`"
+    )
 
     col_in, col_out = st.columns(2)
     with col_in:
@@ -135,12 +184,24 @@ def render_debug_panel(
     else:
         st.write("Waiting...")
 
+    highlight = "visit-order-highlight" if status.startswith(("Starting", "Running")) else ""
+    st.markdown(
+        f'<div id="visit-order-section" class="{highlight}"></div>',
+        unsafe_allow_html=True,
+    )
     st.markdown("**Visit order**")
     if visited:
         path = " → ".join(visited)
         st.code(path, language=None)
     else:
         st.write("—")
+
+    st.markdown("**Token usage (this run)**")
+    run_tokens = summarize_tokens(trace_steps)
+    tcol1, tcol2, tcol3 = st.columns(3)
+    tcol1.metric("Input", f"{run_tokens['input_tokens']}")
+    tcol2.metric("Output", f"{run_tokens['output_tokens']}")
+    tcol3.metric("Total", f"{run_tokens['total_tokens']}")
 
     st.markdown("**Live shared state**")
     state_view = {
@@ -193,6 +254,7 @@ def run_chat_turn(prompt: str, chat_placeholder, debug_placeholder):
     save_debug(visited, trace_steps, running_state, "Starting graph...")
     with debug_placeholder.container():
         render_debug_panel(visited, trace_steps, active_node, running_state, "Starting graph...")
+    scroll_to_visit_order(highlight=True)
 
     for event in stream_agent(prompt, thread_id=str(uuid.uuid4())):
         if event["type"] == "node_start":
@@ -215,6 +277,8 @@ def run_chat_turn(prompt: str, chat_placeholder, debug_placeholder):
             save_debug(visited, trace_steps, running_state, status, active_node)
             with debug_placeholder.container():
                 render_debug_panel(visited, trace_steps, active_node, running_state, status)
+            if len(visited) == 1:
+                scroll_to_visit_order(highlight=True)
 
         elif event["type"] == "complete":
             running_state = event["state"]
@@ -235,6 +299,7 @@ def run_chat_turn(prompt: str, chat_placeholder, debug_placeholder):
             "problem": prompt,
             "visited": visited,
             "trace": trace_steps,
+            "token_usage": summarize_tokens(trace_steps),
             "final_answer": final_answer,
         }
     )
@@ -245,47 +310,12 @@ def run_chat_turn(prompt: str, chat_placeholder, debug_placeholder):
                 st.markdown(msg["content"])
 
 
-def main():
-    init_session()
-
+def render_chat_page():
     st.title("LangGraph Transparent Chatbot")
     st.markdown(
         "Describe a simple life problem. Watch **every node**, **router decision**, "
         "and **state change** live on the right."
     )
-
-    with st.sidebar:
-        st.header("How it works")
-        st.markdown(
-            """
-            1. Your message becomes `state["problem"]`
-            2. **Router** picks the next node (AI chooses from allowed edges)
-            3. Worker nodes read/write shared state
-            4. **Finalize** writes the chat reply
-            """
-        )
-        st.markdown("**Nodes**")
-        for node, label in NODE_LABELS.items():
-            color = NODE_COLORS.get(node, "#64748b")
-            st.markdown(
-                f'<span style="color:{color};font-weight:600;">●</span> {label}',
-                unsafe_allow_html=True,
-            )
-
-        if st.button("Clear chat"):
-            st.session_state.messages = []
-            st.session_state.runs = []
-            st.rerun()
-
-        if st.session_state.runs:
-            st.divider()
-            st.markdown("**Last run export**")
-            st.download_button(
-                "Download trace JSON",
-                data=json.dumps(st.session_state.runs[-1], indent=2),
-                file_name="langgraph_trace.json",
-                mime="application/json",
-            )
 
     chat_col, debug_col = st.columns([1, 1], gap="large")
 
@@ -315,6 +345,82 @@ def main():
     prompt = st.chat_input("Describe a simple life problem...")
     if prompt:
         run_chat_turn(prompt, chat_placeholder, debug_placeholder)
+
+
+def main():
+    init_session()
+
+    with st.sidebar:
+        st.header("Menu")
+        page = st.radio(
+            "Navigation",
+            ["Chat", "Beginner Guide"],
+            label_visibility="collapsed",
+        )
+        st.divider()
+
+        if page == "Chat":
+            st.markdown("**Quick steps**")
+            st.markdown(
+                """
+                1. Your message becomes `state["problem"]`
+                2. **Router** picks the next node
+                3. Worker nodes read/write shared state
+                4. **Finalize** writes the chat reply
+                """
+            )
+            st.markdown("**Nodes**")
+            for node, label in NODE_LABELS.items():
+                color = NODE_COLORS.get(node, "#64748b")
+                st.markdown(
+                    f'<span style="color:{color};font-weight:600;">●</span> {label}',
+                    unsafe_allow_html=True,
+                )
+
+            if st.button("Clear chat"):
+                st.session_state.messages = []
+                st.session_state.runs = []
+                st.session_state.debug = {
+                    "visited": [],
+                    "trace_steps": [],
+                    "running_state": {},
+                    "status": "Idle — waiting for your message.",
+                    "active_node": None,
+                }
+                st.rerun()
+
+            if st.session_state.runs:
+                st.divider()
+                st.markdown("**Token usage (full chat)**")
+                chat_tokens = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+                for run in st.session_state.runs:
+                    usage = run.get("token_usage", {}) or {}
+                    chat_tokens["input_tokens"] += int(usage.get("input_tokens", 0) or 0)
+                    chat_tokens["output_tokens"] += int(usage.get("output_tokens", 0) or 0)
+                    chat_tokens["total_tokens"] += int(usage.get("total_tokens", 0) or 0)
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Input", f"{chat_tokens['input_tokens']}")
+                c2.metric("Output", f"{chat_tokens['output_tokens']}")
+                c3.metric("Total", f"{chat_tokens['total_tokens']}")
+
+            if st.session_state.runs:
+                st.divider()
+                st.markdown("**Last run export**")
+                st.download_button(
+                    "Download trace JSON",
+                    data=json.dumps(st.session_state.runs[-1], indent=2),
+                    file_name="langgraph_trace.json",
+                    mime="application/json",
+                )
+
+        if page == "Beginner Guide":
+            st.markdown("Read how LangGraph and AI routing work in this app.")
+            st.markdown("Switch to **Chat** when you're ready to try it.")
+
+    if page == "Beginner Guide":
+        render_beginner_guide()
+    else:
+        render_chat_page()
 
 
 if __name__ == "__main__":
