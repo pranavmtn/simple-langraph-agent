@@ -8,106 +8,121 @@ GRAPH_IMAGE = Path(__file__).parent / "graph.png"
 
 
 def render_beginner_guide():
-    st.title("Beginner Guide")
+    st.title("The Story Behind It")
     st.markdown(
-        "A simple explanation of how this chatbot uses **LangGraph** and where **AI** fits in."
+        "Why this app exists, what problem it solves, and how LangGraph + AI work together."
+    )
+
+    st.markdown(
+        """
+### The problem
+
+Most chatbots feel like a black box. You type a question, wait, and get an answer —
+but you never see *how* the AI got there.
+
+I built this app to **learn LangGraph** in a hands-on way: a simple life-problem solver
+where you can watch every step live.
+        """
+    )
+
+    st.markdown(
+        """
+### The idea
+
+Instead of one giant AI prompt doing everything, imagine a **small team**:
+
+- A **manager** (`router`) who decides what happens next
+- **Specialists** (`brainstorm`, `action_plan`, `reflect`, …) who each do one job well
+- A shared **whiteboard** (`state`) everyone reads and updates
+
+That team is LangGraph. The intelligence inside each person is AI.
+        """
     )
 
     st.info(
-        "**One-line summary:** LangGraph runs the workflow; AI both performs each step "
-        "and decides which step to run next (within allowed routes)."
+        "**In one sentence:** LangGraph runs the workflow; AI does the work inside each step "
+        "and helps the manager choose the next step."
     )
 
-    st.header("Think of it like a small factory")
-    st.markdown(
-        """
-| Concept | In this app |
-|---------|-------------|
-| **Factory layout** | LangGraph graph (nodes + edges) |
-| **Whiteboard** | Shared state (`state["problem"]`, ideas, steps, answer) |
-| **Workers** | Nodes like `brainstorm`, `action_plan`, `reflect` |
-| **Manager** | `router` node that picks the next step |
-| **AI** | Does the thinking inside workers **and** helps the manager choose |
-        """
-    )
+    st.header("How a message travels")
 
-    st.header("What LangGraph does")
     st.markdown(
         """
-LangGraph does **not** answer in one shot. It runs a graph step by step:
+1. You describe a small everyday problem in **Chat**
+2. Your words land on the whiteboard as `state["problem"]`
+3. The **router** looks at the board and picks the next move
+4. A **worker node** does its job and updates the board
+5. Back to the router — repeat until **finalize** writes your answer
 
 ```text
 START → router → worker → router → worker → ... → finalize → END
 ```
-
-When you send a chat message:
-
-1. Your text becomes `state["problem"]`
-2. LangGraph runs nodes one by one
-3. Each node reads and updates shared state
-4. The `finalize` node writes the answer you see in chat
         """
     )
 
     if GRAPH_IMAGE.exists():
-        st.image(str(GRAPH_IMAGE), caption="Graph structure — dashed lines are AI-chosen paths")
+        st.image(
+            str(GRAPH_IMAGE),
+            caption="The graph — solid lines are fixed; dashed lines are where AI chooses the path",
+        )
 
-    st.header("The two roles of AI")
+    st.header("Why AI shows up twice")
 
     col1, col2 = st.columns(2)
 
     with col1:
-        st.subheader("1. AI as workers")
+        st.subheader("As a worker")
         st.markdown(
             """
-Each worker node calls the LLM for **one focused job**:
+Each node asks AI for **one focused task**:
 
-- **brainstorm** → generate ideas
-- **prioritize** → pick the best ideas
-- **action_plan** → turn ideas into steps
-- **reflect** → check if the plan is realistic
-- **finalize** → write the friendly chat reply
+- brainstorm ideas
+- pick the best ones
+- turn them into steps
+- sanity-check the plan
+- write the final reply
             """
         )
 
     with col2:
-        st.subheader("2. AI as router (manager)")
+        st.subheader("As the manager")
         st.markdown(
             """
-After most nodes, control returns to **router**.
+The **router** asks AI: *given what we know so far, what should we do next?*
 
-The router:
-
-1. Checks what is already done
-2. Builds a list of **allowed next nodes**
-3. Asks AI to pick **one** route from that list
-
-AI never picks from infinite options — only from safe, valid paths.
+It only chooses from **allowed routes** — never random jumps.
+That is the orchestration pattern LangGraph is great at teaching.
             """
         )
 
-    st.header("Example visit order")
+    st.header("A real path through the graph")
     st.code(
         "router → brainstorm → router → prioritize → router → "
         "action_plan → router → reflect → router → finalize",
         language=None,
     )
-    st.caption("You see one clean answer in chat, but many steps happened under the hood.")
+    st.caption(
+        "You see one friendly answer in chat. Under the Hood shows the full journey."
+    )
 
-    st.header("Why not one big AI prompt?")
+    st.header("Why transparency matters")
+
     st.markdown(
         """
-A single prompt asks one model to do everything at once. This design splits work:
+This app is a **learning lab**, not just a chatbot.
 
-- **Workers** = focused tasks (better quality, easier to debug)
-- **Router** = dynamic flow based on current state
-- **LangGraph** = reliable execution you can watch live
+The right panel shows:
 
-That is why the right panel can show visit order, per-step input/output, and token usage.
+- **Visit order** — which nodes ran, in sequence
+- **AI decided the flow** — when the router chose the path
+- **Input / output JSON** — what each node read and wrote
+- **Token usage** — cost of each step and the whole session (10K limit)
+
+You are not meant to trust the answer blindly. You are meant to **see the machinery**.
         """
     )
 
-    st.header("Node reference")
+    st.header("Meet the nodes")
     for node, label in NODE_LABELS.items():
         color = NODE_COLORS.get(node, "#64748b")
         st.markdown(
@@ -115,17 +130,20 @@ That is why the right panel can show visit order, per-step input/output, and tok
             unsafe_allow_html=True,
         )
 
-    st.header("Files to explore")
+    st.header("Under the hood in code")
     st.markdown(
         """
-| File | Purpose |
-|------|---------|
-| `state.py` | Shared memory passed between nodes |
-| `nodes.py` | Worker nodes (AI tasks) |
-| `router.py` | Manager + allowed routes logic |
-| `graph.py` | Wires nodes and conditional edges |
-| `app.py` | Chat UI + live transparency panel |
+| File | Role in the story |
+|------|-------------------|
+| `state.py` | The shared whiteboard |
+| `nodes.py` | The specialists |
+| `router.py` | The manager + routing rules |
+| `graph.py` | The factory floor plan |
+| `app.py` | What you see — chat + live trace |
         """
     )
 
-    st.success("Tip: Send a message in **Chat**, then watch **Visit order** update on the right.")
+    st.success(
+        "Ready? Go to **Chat**, ask something like *I keep forgetting to drink water*, "
+        "and watch the story unfold on the right."
+    )

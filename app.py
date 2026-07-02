@@ -1,4 +1,3 @@
-import html
 import json
 import os
 import uuid
@@ -22,6 +21,7 @@ if "OPENAI_API_KEY" not in os.environ:
         pass
 
 GRAPH_IMAGE = Path(__file__).parent / "graph.png"
+SESSION_TOKEN_LIMIT = int(os.getenv("SESSION_TOKEN_LIMIT", "10000"))
 
 st.set_page_config(
     page_title="LangGraph Transparent Chat",
@@ -72,22 +72,6 @@ st.markdown(
         font-weight: 700;
         padding: 0 0.15rem;
     }
-    .json-block {
-        background: #0f172a;
-        color: #e2e8f0;
-        border-radius: 8px;
-        padding: 0.75rem 0.9rem;
-        font-size: 0.82rem;
-        line-height: 1.45;
-        overflow-x: auto;
-        white-space: pre-wrap;
-        word-break: break-word;
-        margin-bottom: 0.75rem;
-    }
-    .json-label {
-        font-weight: 600;
-        margin: 0.35rem 0 0.25rem 0;
-    }
     .live-pulse {
         animation: pulse 1.2s ease-in-out infinite;
     }
@@ -118,6 +102,11 @@ st.markdown(
         .mobile-hood {
             display: block;
         }
+    }
+    .sidebar-erase-wrap {
+        margin-top: 1.5rem;
+        padding-top: 1rem;
+        border-top: 1px solid #e2e8f0;
     }
     </style>
     """,
@@ -170,11 +159,10 @@ def scroll_to_visit_order(highlight: bool = False):
     )
 
 
-def render_json_block(label: str, data: dict):
-    """Full-width JSON block with wrapping (no cramped side-by-side columns)."""
-    st.markdown(f'<div class="json-label">{label}</div>', unsafe_allow_html=True)
-    payload = html.escape(json.dumps(data, indent=2, ensure_ascii=False))
-    st.markdown(f'<pre class="json-block">{payload}</pre>', unsafe_allow_html=True)
+def render_json_expander(label: str, data: dict, expanded: bool = False):
+    """Proper formatted JSON inside a collapsible expander."""
+    with st.expander(label, expanded=expanded):
+        st.json(data)
 
 
 def render_visit_order(visited: list[str]):
@@ -203,6 +191,61 @@ def summarize_tokens(trace_steps: list[dict]) -> dict[str, int]:
         totals["output_tokens"] += int(usage.get("output_tokens", 0) or 0)
         totals["total_tokens"] += int(usage.get("total_tokens", 0) or 0)
     return totals
+
+
+def get_session_token_usage() -> dict[str, int]:
+    """Total token usage across all runs in this browser session."""
+    totals = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    for run in st.session_state.runs:
+        usage = run.get("token_usage", {}) or {}
+        totals["input_tokens"] += int(usage.get("input_tokens", 0) or 0)
+        totals["output_tokens"] += int(usage.get("output_tokens", 0) or 0)
+        totals["total_tokens"] += int(usage.get("total_tokens", 0) or 0)
+    return totals
+
+
+def session_tokens_remaining() -> int:
+    return max(0, SESSION_TOKEN_LIMIT - get_session_token_usage()["total_tokens"])
+
+
+def session_limit_reached() -> bool:
+    return get_session_token_usage()["total_tokens"] >= SESSION_TOKEN_LIMIT
+
+
+def erase_session():
+    st.session_state.messages = []
+    st.session_state.runs = []
+    st.session_state.debug = {
+        "visited": [],
+        "trace_steps": [],
+        "running_state": {},
+        "status": "Idle — waiting for your message.",
+        "active_node": None,
+    }
+    st.session_state.mobile_hood_open = False
+
+
+def render_sidebar_erase_button():
+    st.markdown('<div class="sidebar-erase-wrap">', unsafe_allow_html=True)
+    if st.button("🗑️", key="erase_session", help="Erase session", use_container_width=True):
+        erase_session()
+        st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_session_token_budget():
+    usage = get_session_token_usage()
+    used = usage["total_tokens"]
+    progress = min(used / SESSION_TOKEN_LIMIT, 1.0) if SESSION_TOKEN_LIMIT else 0.0
+
+    st.markdown("**Session token budget**")
+    st.caption(f"{used:,} / {SESSION_TOKEN_LIMIT:,} tokens used")
+    st.progress(progress)
+
+    if session_limit_reached():
+        st.error("Session limit reached. Use the erase button below to start a new session.")
+    elif used >= SESSION_TOKEN_LIMIT * 0.8:
+        st.warning(f"Only {session_tokens_remaining():,} tokens left this session.")
 
 
 def render_trace_step(step: dict, step_num: int, active: bool = False):
@@ -244,8 +287,8 @@ def render_trace_step(step: dict, step_num: int, active: bool = False):
         f"total: `{usage.get('total_tokens', 0)}`"
     )
 
-    render_json_block("Input (state read)", step.get("input", {}))
-    render_json_block("Output (state written)", step.get("output", {}))
+    render_json_expander("Input (state read)", step.get("input", {}))
+    render_json_expander("Output (state written)", step.get("output", {}))
 
 
 def render_debug_panel(
@@ -285,6 +328,11 @@ def render_debug_panel(
     tcol2.metric("Output", f"{run_tokens['output_tokens']}")
     tcol3.metric("Total", f"{run_tokens['total_tokens']}")
 
+    session_used = get_session_token_usage()["total_tokens"]
+    st.caption(
+        f"Session total: `{session_used:,}` / `{SESSION_TOKEN_LIMIT:,}` tokens"
+    )
+
     st.markdown("**Live shared state**")
     state_view = {
         "problem": running_state.get("problem", ""),
@@ -294,7 +342,7 @@ def render_debug_panel(
         "reflected": running_state.get("reflected", False),
         "final_answer": running_state.get("final_answer", ""),
     }
-    render_json_block("Current state snapshot", state_view)
+    render_json_expander("Current state snapshot", state_view)
 
     st.markdown("**Step-by-step trace**")
     if not trace_steps:
@@ -304,7 +352,7 @@ def render_debug_panel(
             is_active = active_node == step.get("node") and status.startswith("Running")
             with st.expander(
                 f"Step {i}: {NODE_LABELS.get(step.get('node', ''), step.get('node', '?'))}",
-                expanded=is_active or i == len(trace_steps),
+                expanded=is_active,
             ):
                 render_trace_step(step, i, active=is_active)
 
@@ -317,6 +365,12 @@ def save_debug(visited, trace_steps, running_state, status, active_node=None):
         "status": status,
         "active_node": active_node,
     }
+
+
+def update_chat_placeholders(*placeholders):
+    for placeholder in placeholders:
+        with placeholder.container():
+            render_messages()
 
 
 def update_debug_panels(
@@ -335,11 +389,14 @@ def update_debug_panels(
         render_debug_panel(visited, trace_steps, active_node, running_state, status)
 
 
-def run_chat_turn(prompt: str, chat_placeholder, debug_placeholder, mobile_debug_placeholder):
+def run_chat_turn(
+    prompt: str,
+    chat_placeholders: list,
+    debug_placeholder,
+    mobile_debug_placeholder,
+):
     st.session_state.messages.append({"role": "user", "content": prompt})
-
-    with chat_placeholder.container():
-        render_messages()
+    update_chat_placeholders(*chat_placeholders)
 
     visited: list[str] = []
     trace_steps: list[dict] = []
@@ -424,8 +481,7 @@ def run_chat_turn(prompt: str, chat_placeholder, debug_placeholder, mobile_debug
         }
     )
 
-    with chat_placeholder.container():
-        render_messages()
+    update_chat_placeholders(*chat_placeholders)
 
 
 def render_messages():
@@ -438,32 +494,42 @@ def render_chat_page():
     st.title("LangGraph Transparent Chatbot")
     st.markdown(
         "Describe a simple life problem. Watch **every node**, **router decision**, "
-        "and **state change** live in Under the Hood."
+        "and **state change** live on the right."
     )
 
     dbg = st.session_state.debug
 
-    st.subheader("Chat")
-    chat_placeholder = st.empty()
-    with chat_placeholder.container():
-        render_messages()
-
-    if not st.session_state.messages:
-        st.info("Try: *I keep forgetting to drink water during the day*")
-
     st.markdown('<div class="desktop-hood">', unsafe_allow_html=True)
-    debug_placeholder = st.empty()
-    with debug_placeholder.container():
-        render_debug_panel(
-            dbg["visited"],
-            dbg["trace_steps"],
-            dbg["active_node"],
-            dbg["running_state"],
-            dbg["status"],
-        )
+    chat_col, debug_col = st.columns([1, 1], gap="large")
+
+    with chat_col:
+        st.subheader("Chat")
+        desktop_chat_placeholder = st.empty()
+        with desktop_chat_placeholder.container():
+            render_messages()
+        if not st.session_state.messages:
+            st.info("Try: *I keep forgetting to drink water during the day*")
+
+    with debug_col:
+        debug_placeholder = st.empty()
+        with debug_placeholder.container():
+            render_debug_panel(
+                dbg["visited"],
+                dbg["trace_steps"],
+                dbg["active_node"],
+                dbg["running_state"],
+                dbg["status"],
+            )
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown('<div class="mobile-hood">', unsafe_allow_html=True)
+    st.subheader("Chat")
+    mobile_chat_placeholder = st.empty()
+    with mobile_chat_placeholder.container():
+        render_messages()
+    if not st.session_state.messages:
+        st.info("Try: *I keep forgetting to drink water during the day*")
+
     with st.expander(
         "Under the Hood (tap to open)",
         expanded=st.session_state.mobile_hood_open,
@@ -479,12 +545,37 @@ def render_chat_page():
             )
     st.markdown("</div>", unsafe_allow_html=True)
 
-    prompt = st.chat_input("Describe a simple life problem...")
+    if session_limit_reached():
+        st.error(
+            f"Session token limit reached ({SESSION_TOKEN_LIMIT:,} tokens). "
+            "Use the erase button in the sidebar to start a new session."
+        )
+
+    prompt = st.chat_input(
+        "Describe a simple life problem..."
+        if not session_limit_reached()
+        else "Session limit reached — erase session to continue"
+    )
     if prompt:
+        if session_limit_reached():
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            st.session_state.messages.append(
+                {
+                    "role": "assistant",
+                    "content": (
+                        f"This session has reached the {SESSION_TOKEN_LIMIT:,} token limit. "
+                        "Tap the erase button at the bottom of the sidebar to reset."
+                    ),
+                }
+            )
+            update_chat_placeholders(desktop_chat_placeholder, mobile_chat_placeholder)
+            st.rerun()
+            return
+
         st.session_state.mobile_hood_open = True
         run_chat_turn(
             prompt,
-            chat_placeholder,
+            [desktop_chat_placeholder, mobile_chat_placeholder],
             debug_placeholder,
             mobile_debug_placeholder,
         )
@@ -498,7 +589,7 @@ def main():
         st.header("Menu")
         page = st.radio(
             "Navigation",
-            ["Chat", "Beginner Guide"],
+            ["Chat", "The Story Behind It"],
             label_visibility="collapsed",
         )
         st.divider()
@@ -521,27 +612,13 @@ def main():
                     unsafe_allow_html=True,
                 )
 
-            if st.button("Clear chat"):
-                st.session_state.messages = []
-                st.session_state.runs = []
-                st.session_state.debug = {
-                    "visited": [],
-                    "trace_steps": [],
-                    "running_state": {},
-                    "status": "Idle — waiting for your message.",
-                    "active_node": None,
-                }
-                st.rerun()
+            st.divider()
+            render_session_token_budget()
 
             if st.session_state.runs:
                 st.divider()
-                st.markdown("**Token usage (full chat)**")
-                chat_tokens = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
-                for run in st.session_state.runs:
-                    usage = run.get("token_usage", {}) or {}
-                    chat_tokens["input_tokens"] += int(usage.get("input_tokens", 0) or 0)
-                    chat_tokens["output_tokens"] += int(usage.get("output_tokens", 0) or 0)
-                    chat_tokens["total_tokens"] += int(usage.get("total_tokens", 0) or 0)
+                st.markdown("**Token breakdown**")
+                chat_tokens = get_session_token_usage()
                 c1, c2, c3 = st.columns(3)
                 c1.metric("Input", f"{chat_tokens['input_tokens']}")
                 c2.metric("Output", f"{chat_tokens['output_tokens']}")
@@ -557,11 +634,13 @@ def main():
                     mime="application/json",
                 )
 
-        if page == "Beginner Guide":
-            st.markdown("Read how LangGraph and AI routing work in this app.")
+        if page == "The Story Behind It":
+            st.markdown("Why this app was built and how LangGraph orchestration works.")
             st.markdown("Switch to **Chat** when you're ready to try it.")
 
-    if page == "Beginner Guide":
+        render_sidebar_erase_button()
+
+    if page == "The Story Behind It":
         render_beginner_guide()
     else:
         render_chat_page()
