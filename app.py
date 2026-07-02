@@ -1,5 +1,6 @@
 import json
 import os
+import time
 import uuid
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from dotenv import load_dotenv
 from beginner_guide import render_beginner_guide
 from graph import stream_agent
 from router import NODE_COLORS, NODE_LABELS
+from ui_styles import inject_layout_css
 
 load_dotenv()
 
@@ -21,6 +23,8 @@ if "OPENAI_API_KEY" not in os.environ:
 
 GRAPH_IMAGE = Path(__file__).parent / "graph.png"
 SESSION_TOKEN_LIMIT = int(os.getenv("SESSION_TOKEN_LIMIT", "10000"))
+STEP_RUNNING_PAUSE_SEC = float(os.getenv("STEP_RUNNING_PAUSE_SEC", "0.65"))
+STEP_FINISHED_PAUSE_SEC = float(os.getenv("STEP_FINISHED_PAUSE_SEC", "0.25"))
 
 st.set_page_config(
     page_title="LangGraph Transparent Chat",
@@ -28,94 +32,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-
-st.markdown(
-    """
-    <style>
-    .node-badge {
-        display: inline-block;
-        padding: 3px 10px;
-        border-radius: 999px;
-        background: transparent;
-        border: 1.5px solid;
-        font-weight: 600;
-        font-size: 0.82rem;
-        margin-right: 6px;
-        white-space: nowrap;
-    }
-    .trace-step-header {
-        display: flex;
-        align-items: center;
-        gap: 0.45rem;
-        margin-bottom: 0.35rem;
-        padding: 0.1rem 0;
-    }
-    .trace-step-num {
-        color: #b8c5d6;
-        font-size: 0.82rem;
-        font-weight: 500;
-    }
-    .ai-flow-line {
-        display: flex;
-        align-items: center;
-        flex-wrap: wrap;
-        gap: 0.35rem;
-        margin: 0.2rem 0 0.45rem 0;
-        font-size: 0.86rem;
-        color: #b8c5d6;
-        font-weight: 500;
-    }
-    .ai-flow-arrow {
-        color: #d4dde8;
-        font-weight: 400;
-    }
-    .visit-flow-wrap {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 0.35rem;
-        margin: 0.25rem 0 0.75rem 0;
-    }
-    .visit-arrow {
-        color: #64748b;
-        font-weight: 700;
-        padding: 0 0.15rem;
-    }
-    .live-pulse {
-        animation: pulse 1.2s ease-in-out infinite;
-    }
-    @keyframes pulse {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.45; }
-    }
-    .sidebar-erase-wrap {
-        margin-top: 1.5rem;
-        padding-top: 1rem;
-        border-top: 1px solid #e2e8f0;
-    }
-    .sidebar-token-line {
-        font-size: 0.78rem;
-        color: #64748b;
-        line-height: 1.4;
-        margin: 0;
-    }
-    .under-hood-roof-wrap {
-        width: 100%;
-        max-width: 9.5rem;
-        margin: 0 auto 0.1rem auto;
-        line-height: 0;
-        pointer-events: none;
-    }
-    .under-hood-roof {
-        width: 100%;
-        height: 14px;
-        display: block;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
 
 def init_session():
     if "messages" not in st.session_state:
@@ -141,25 +57,65 @@ def badge(node: str, active: bool = False) -> str:
     )
 
 
-def render_under_hood_roof():
-    """Small peaked roof SVG above the Under the Hood section."""
+def render_page_header(title: str, subtitle: str):
     st.markdown(
-        """
-        <div class="under-hood-roof-wrap" aria-hidden="true">
-          <svg class="under-hood-roof" viewBox="0 0 120 16" xmlns="http://www.w3.org/2000/svg">
-            <path
-              d="M0 16 L60 1 L120 16 Z"
-              fill="#f8fafc"
-              stroke="#94a3b8"
-              stroke-width="1"
-              stroke-linejoin="round"
-            />
-            <path d="M60 1 L60 16" stroke="#cbd5e1" stroke-width="0.75"/>
-          </svg>
+        f"""
+        <div class="page-header">
+          <h1>{title}</h1>
+          <p>{subtitle}</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
+
+
+def render_under_hood_divider():
+    st.markdown('<hr class="under-hood-divider">', unsafe_allow_html=True)
+
+
+def render_running_banner(status: str):
+    if not status.startswith(("Starting", "Running")):
+        return
+    st.markdown(
+        f"""
+        <div class="graph-running-banner">
+          <span class="graph-running-dot"></span>
+          <span>{status}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_step_running_placeholder(node: str):
+    label = NODE_LABELS.get(node, node)
+    st.markdown(
+        f"""
+        <div class="step-running-label">
+          {badge(node, active=True)}
+          <span>Running <strong>{label}</strong>…</span>
+        </div>
+        <div class="step-running-bar">
+          <div class="step-running-bar-fill"></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_thinking_message():
+    with st.chat_message("assistant"):
+        st.markdown(
+            """
+            <div class="assistant-thinking">
+              <span class="thinking-dot"></span>
+              <span class="thinking-dot"></span>
+              <span class="thinking-dot"></span>
+              <span class="thinking-label">Running the graph…</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 def render_json_expander(label: str, data: dict, expanded: bool = False):
@@ -189,12 +145,23 @@ def get_session_token_usage() -> dict[str, int]:
     return totals
 
 
-def session_tokens_remaining() -> int:
-    return max(0, SESSION_TOKEN_LIMIT - get_session_token_usage()["total_tokens"])
-
-
 def session_limit_reached() -> bool:
     return get_session_token_usage()["total_tokens"] >= SESSION_TOKEN_LIMIT
+
+
+def session_depth_label() -> str:
+    """Opaque session load hint — no token counts exposed to users."""
+    used = get_session_token_usage()["total_tokens"]
+    ratio = used / SESSION_TOKEN_LIMIT if SESSION_TOKEN_LIMIT else 0
+    if ratio >= 1:
+        return "trace depth · saturated"
+    if ratio >= 0.8:
+        return "trace depth · thinning"
+    if ratio >= 0.5:
+        return "trace depth · warming"
+    if ratio > 0:
+        return "trace depth · active"
+    return "trace depth · idle"
 
 
 def erase_session():
@@ -222,7 +189,7 @@ def render_session_limit_warning():
     if session_limit_reached():
         st.error("Session limit reached. Use erase below to reset.")
     elif get_session_token_usage()["total_tokens"] >= SESSION_TOKEN_LIMIT * 0.8:
-        st.warning(f"{session_tokens_remaining():,} tokens left this session.")
+        st.warning("Pipeline headroom is getting low — consider erasing the session soon.")
 
 
 def render_compact_token_breakdown():
@@ -246,7 +213,7 @@ def render_trace_step(step: dict, step_num: int, active: bool = False):
     st.markdown(
         f'<div class="trace-step-header">'
         f"{badge(node, active=active)}"
-        f'<span class="trace-step-num">Step {step_num}</span>'
+        f'<span class="trace-step-num">----- step {step_num}</span>'
         f"</div>",
         unsafe_allow_html=True,
     )
@@ -298,7 +265,9 @@ def render_debug_summary(
 ):
     """Under the Hood panel: tokens, live state, and step-by-step trace."""
     st.subheader("Under the Hood")
-    st.caption(status)
+    render_running_banner(status)
+    if not status.startswith(("Starting", "Running")):
+        st.caption(status)
 
     st.markdown("**Token usage (this run)**")
     run_tokens = summarize_tokens(trace_steps)
@@ -307,10 +276,7 @@ def render_debug_summary(
     tcol2.metric("Output", f"{run_tokens['output_tokens']}")
     tcol3.metric("Total", f"{run_tokens['total_tokens']}")
 
-    session_used = get_session_token_usage()["total_tokens"]
-    st.caption(
-        f"Session total: `{session_used:,}` / `{SESSION_TOKEN_LIMIT:,}` tokens"
-    )
+    st.caption(f"Pipeline status · `{session_depth_label()}`")
 
     st.markdown("**Live shared state**")
     state_view = {
@@ -337,17 +303,37 @@ def render_step_trace(
 ):
     """Step-by-step trace inside the Under the Hood panel."""
     st.markdown("**Step-by-step trace**")
-    if not trace_steps:
+    running = bool(active_node and status.startswith("Running"))
+
+    if not trace_steps and not running:
         st.info("Send a message to watch nodes run live.")
         return
 
     for i, step in enumerate(trace_steps, start=1):
-        is_active = active_node == step.get("node") and status.startswith("Running")
+        is_active = running and active_node == step.get("node")
+        marker_class = (
+            "trace-step-marker trace-step-running"
+            if is_active
+            else "trace-step-marker trace-step-done"
+        )
+        st.markdown(f'<div class="{marker_class}"></div>', unsafe_allow_html=True)
         with st.expander(
             f"Step {i}: {NODE_LABELS.get(step.get('node', ''), step.get('node', '?'))}",
             expanded=is_active,
         ):
             render_trace_step(step, i, active=is_active)
+
+    if running and (
+        not trace_steps or trace_steps[-1].get("node") != active_node
+    ):
+        step_num = len(trace_steps) + 1
+        label = NODE_LABELS.get(active_node or "", active_node or "?")
+        st.markdown(
+            '<div class="trace-step-marker trace-step-running"></div>',
+            unsafe_allow_html=True,
+        )
+        with st.expander(f"Step {step_num}: {label} — running…", expanded=True):
+            render_step_running_placeholder(active_node or "")
 
 
 def save_debug(visited, trace_steps, running_state, status, active_node=None):
@@ -383,6 +369,7 @@ def run_chat_turn(
     st.session_state.messages.append({"role": "user", "content": prompt})
     with chat_placeholder.container():
         render_messages()
+        render_thinking_message()
 
     visited: list[str] = []
     trace_steps: list[dict] = []
@@ -398,12 +385,13 @@ def run_chat_turn(
         "Starting graph...",
         active_node,
     )
+    time.sleep(0.3)
 
     for event in stream_agent(prompt, thread_id=str(uuid.uuid4())):
         if event["type"] == "node_start":
             active_node = event["node"]
             running_state = event["state"]
-            status = f"Running `{active_node}`..."
+            status = f"Running {NODE_LABELS.get(active_node, active_node)}…"
             update_debug_panel(
                 debug_placeholder,
                 visited,
@@ -412,24 +400,26 @@ def run_chat_turn(
                 status,
                 active_node,
             )
+            time.sleep(STEP_RUNNING_PAUSE_SEC)
 
         elif event["type"] == "node_end":
-            active_node = None
             visited = event.get("visited", visited)
             running_state = event["state"]
             trace = event.get("trace")
             if trace:
                 trace_steps.append(trace)
 
-            status = f"Finished `{event['node']}`"
+            status = f"Finished {NODE_LABELS.get(event['node'], event['node'])}"
             update_debug_panel(
                 debug_placeholder,
                 visited,
                 trace_steps,
                 running_state,
                 status,
-                active_node,
+                None,
             )
+            time.sleep(STEP_FINISHED_PAUSE_SEC)
+            active_node = None
 
         elif event["type"] == "complete":
             running_state = event["state"]
@@ -471,10 +461,10 @@ def render_messages():
 
 
 def render_chat_page():
-    st.title("LangGraph Transparent Chatbot")
-    st.markdown(
-        "Describe a simple life problem. Watch **every node**, **router decision**, "
-        "and **state change** live on the right."
+    render_page_header(
+        "LangGraph Transparent Chatbot",
+        "Describe a simple life problem. Watch every node, router decision, "
+        "and state change live on the right.",
     )
 
     dbg = st.session_state.debug
@@ -490,7 +480,7 @@ def render_chat_page():
             st.info("Try: *I keep forgetting to drink water during the day*")
 
     with debug_col:
-        render_under_hood_roof()
+        render_under_hood_divider()
         debug_placeholder = st.empty()
         with debug_placeholder.container():
             render_debug_summary(
@@ -502,7 +492,7 @@ def render_chat_page():
 
     if session_limit_reached():
         st.error(
-            f"Session token limit reached ({SESSION_TOKEN_LIMIT:,} tokens). "
+            "Pipeline headroom exhausted. "
             "Use the erase button in the sidebar to start a new session."
         )
 
@@ -518,7 +508,7 @@ def render_chat_page():
                 {
                     "role": "assistant",
                     "content": (
-                        f"This session has reached the {SESSION_TOKEN_LIMIT:,} token limit. "
+                        "This session has reached its pipeline limit. "
                         "Tap the erase button at the bottom of the sidebar to reset."
                     ),
                 }
@@ -538,6 +528,7 @@ def render_chat_page():
 
 def main():
     init_session()
+    inject_layout_css()
 
     with st.sidebar:
         st.header("Menu")

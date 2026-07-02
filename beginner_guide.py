@@ -7,9 +7,16 @@ from router import NODE_COLORS, NODE_LABELS
 GRAPH_IMAGE = Path(__file__).parent / "graph.png"
 
 
-def render_beginner_guide():
-    st.title("The Story Behind It")
-    st.markdown("See how **LangGraph orchestration** works.")
+def _render_story_body():
+    st.markdown(
+        """
+        <div class="story-header">
+          <h1>The Story Behind It</h1>
+          <p>See how <strong>LangGraph orchestration</strong> works.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     st.markdown(
         """
@@ -143,3 +150,9 @@ The 10K session token cap keeps experiments cheap while you iterate.
     st.success(
         "Go to **Chat**, try a small life problem, and watch the graph work in real time."
     )
+
+
+def render_beginner_guide():
+    _, content, _ = st.columns([0.12, 0.76, 0.12])
+    with content:
+        _render_story_body()
