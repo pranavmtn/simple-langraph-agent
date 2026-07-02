@@ -4,7 +4,6 @@ import uuid
 from pathlib import Path
 
 import streamlit as st
-import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
 from beginner_guide import render_beginner_guide
@@ -79,20 +78,16 @@ st.markdown(
         0%, 100% { opacity: 1; }
         50% { opacity: 0.45; }
     }
-    #visit-order-section {
-        scroll-margin-top: 5rem;
-    }
-    .visit-order-highlight {
-        animation: visit-order-glow 1.2s ease-in-out 2;
-    }
-    @keyframes visit-order-glow {
-        0%, 100% { background: transparent; }
-        50% { background: #eef2ff; border-radius: 8px; }
-    }
     .desktop-hood {
         display: block;
     }
     .mobile-hood {
+        display: none;
+    }
+    .desktop-trace {
+        display: block;
+    }
+    .mobile-trace {
         display: none;
     }
     @media (max-width: 900px) {
@@ -102,11 +97,49 @@ st.markdown(
         .mobile-hood {
             display: block;
         }
+        .desktop-trace {
+            display: none;
+        }
+        .mobile-trace {
+            display: block;
+        }
     }
     .sidebar-erase-wrap {
         margin-top: 1.5rem;
         padding-top: 1rem;
         border-top: 1px solid #e2e8f0;
+    }
+    .sidebar-token-line {
+        font-size: 0.78rem;
+        color: #64748b;
+        line-height: 1.4;
+        margin: 0;
+    }
+    .under-hood-highlight {
+        background: #f0fdf4;
+        border: 1px solid #dcfce7;
+        border-radius: 10px;
+        padding: 0.65rem 0.75rem;
+    }
+    .mobile-hood div[data-testid="stExpander"] {
+        background: #f0fdf4;
+        border: 1px solid #dcfce7;
+        border-radius: 10px;
+        overflow: hidden;
+    }
+    .mobile-hood div[data-testid="stExpander"] details {
+        background: #f0fdf4;
+        border: none;
+    }
+    .mobile-hood div[data-testid="stExpander"] summary {
+        background: #f0fdf4;
+        border-radius: 10px;
+        font-weight: 600;
+    }
+    .mobile-hood div[data-testid="stExpander"] [data-testid="stExpanderDetails"] {
+        background: #f7fef9;
+        border-top: 1px solid #dcfce7;
+        padding-top: 0.5rem;
     }
     </style>
     """,
@@ -140,47 +173,10 @@ def badge(node: str, active: bool = False) -> str:
     )
 
 
-def scroll_to_visit_order(highlight: bool = False):
-    """Smooth-scroll the main page to the Visit order section."""
-    highlight_class = "visit-order-highlight" if highlight else ""
-    components.html(
-        f"""
-        <script>
-            (function() {{
-                const doc = window.parent.document;
-                const el = doc.getElementById("visit-order-section");
-                if (!el) return;
-                el.classList.add("{highlight_class}");
-                el.scrollIntoView({{ behavior: "smooth", block: "start" }});
-            }})();
-        </script>
-        """,
-        height=0,
-    )
-
-
 def render_json_expander(label: str, data: dict, expanded: bool = False):
     """Proper formatted JSON inside a collapsible expander."""
     with st.expander(label, expanded=expanded):
         st.json(data)
-
-
-def render_visit_order(visited: list[str]):
-    """Render visit path as wrapping badges instead of one long horizontal line."""
-    if not visited:
-        st.write("—")
-        return
-
-    parts = []
-    for index, node in enumerate(visited):
-        parts.append(badge(node))
-        if index < len(visited) - 1:
-            parts.append('<span class="visit-arrow">→</span>')
-
-    st.markdown(
-        f'<div class="visit-flow-wrap">{"".join(parts)}</div>',
-        unsafe_allow_html=True,
-    )
 
 
 def summarize_tokens(trace_steps: list[dict]) -> dict[str, int]:
@@ -233,19 +229,28 @@ def render_sidebar_erase_button():
     st.markdown("</div>", unsafe_allow_html=True)
 
 
-def render_session_token_budget():
-    usage = get_session_token_usage()
-    used = usage["total_tokens"]
-    progress = min(used / SESSION_TOKEN_LIMIT, 1.0) if SESSION_TOKEN_LIMIT else 0.0
-
-    st.markdown("**Session token budget**")
-    st.caption(f"{used:,} / {SESSION_TOKEN_LIMIT:,} tokens used")
-    st.progress(progress)
-
+def render_session_limit_warning():
+    """Show limit warnings only when needed (no budget progress bar)."""
     if session_limit_reached():
-        st.error("Session limit reached. Use the erase button below to start a new session.")
-    elif used >= SESSION_TOKEN_LIMIT * 0.8:
-        st.warning(f"Only {session_tokens_remaining():,} tokens left this session.")
+        st.error("Session limit reached. Use erase below to reset.")
+    elif get_session_token_usage()["total_tokens"] >= SESSION_TOKEN_LIMIT * 0.8:
+        st.warning(f"{session_tokens_remaining():,} tokens left this session.")
+
+
+def render_compact_token_breakdown():
+    """Small one-line token summary for the sidebar."""
+    if not st.session_state.runs:
+        return
+
+    tokens = get_session_token_usage()
+    st.markdown(
+        f'<p class="sidebar-token-line">'
+        f"In <b>{tokens['input_tokens']}</b> · "
+        f"Out <b>{tokens['output_tokens']}</b> · "
+        f"Total <b>{tokens['total_tokens']}</b>"
+        f"</p>",
+        unsafe_allow_html=True,
+    )
 
 
 def render_trace_step(step: dict, step_num: int, active: bool = False):
@@ -291,35 +296,14 @@ def render_trace_step(step: dict, step_num: int, active: bool = False):
     render_json_expander("Output (state written)", step.get("output", {}))
 
 
-def render_debug_panel(
-    visited: list[str],
+def render_debug_summary(
     trace_steps: list[dict],
-    active_node: str | None,
     running_state: dict,
     status: str,
 ):
+    """Compact right-column panel: tokens + live state only."""
     st.subheader("Under the Hood")
     st.caption(status)
-
-    if GRAPH_IMAGE.exists():
-        st.image(str(GRAPH_IMAGE), caption="Graph structure (dashed = AI-chosen edges)")
-
-    st.markdown("**Active node**")
-    if active_node:
-        st.markdown(badge(active_node, active=True), unsafe_allow_html=True)
-    else:
-        st.write("Waiting...")
-
-    highlight = "visit-order-highlight" if status.startswith(("Starting", "Running")) else ""
-    st.markdown(
-        f'<div id="visit-order-section" class="{highlight}"></div>',
-        unsafe_allow_html=True,
-    )
-    st.markdown("**Visit order**")
-    if visited:
-        render_visit_order(visited)
-    else:
-        st.write("—")
 
     st.markdown("**Token usage (this run)**")
     run_tokens = summarize_tokens(trace_steps)
@@ -342,19 +326,31 @@ def render_debug_panel(
         "reflected": running_state.get("reflected", False),
         "final_answer": running_state.get("final_answer", ""),
     }
-    render_json_expander("Current state snapshot", state_view)
+    render_json_expander(
+        "Current state snapshot",
+        state_view,
+        expanded=status.startswith(("Starting", "Running")),
+    )
 
+
+def render_step_trace(
+    trace_steps: list[dict],
+    active_node: str | None,
+    status: str,
+):
+    """Full-width step-by-step trace shown below the chat area."""
     st.markdown("**Step-by-step trace**")
     if not trace_steps:
         st.info("Send a message to watch nodes run live.")
-    else:
-        for i, step in enumerate(trace_steps, start=1):
-            is_active = active_node == step.get("node") and status.startswith("Running")
-            with st.expander(
-                f"Step {i}: {NODE_LABELS.get(step.get('node', ''), step.get('node', '?'))}",
-                expanded=is_active,
-            ):
-                render_trace_step(step, i, active=is_active)
+        return
+
+    for i, step in enumerate(trace_steps, start=1):
+        is_active = active_node == step.get("node") and status.startswith("Running")
+        with st.expander(
+            f"Step {i}: {NODE_LABELS.get(step.get('node', ''), step.get('node', '?'))}",
+            expanded=is_active,
+        ):
+            render_trace_step(step, i, active=is_active)
 
 
 def save_debug(visited, trace_steps, running_state, status, active_node=None):
@@ -376,6 +372,8 @@ def update_chat_placeholders(*placeholders):
 def update_debug_panels(
     debug_placeholder,
     mobile_debug_placeholder,
+    desktop_trace_placeholder,
+    mobile_trace_placeholder,
     visited,
     trace_steps,
     running_state,
@@ -384,9 +382,13 @@ def update_debug_panels(
 ):
     save_debug(visited, trace_steps, running_state, status, active_node)
     with debug_placeholder.container():
-        render_debug_panel(visited, trace_steps, active_node, running_state, status)
+        render_debug_summary(trace_steps, running_state, status)
     with mobile_debug_placeholder.container():
-        render_debug_panel(visited, trace_steps, active_node, running_state, status)
+        render_debug_summary(trace_steps, running_state, status)
+    with desktop_trace_placeholder.container():
+        render_step_trace(trace_steps, active_node, status)
+    with mobile_trace_placeholder.container():
+        render_step_trace(trace_steps, active_node, status)
 
 
 def run_chat_turn(
@@ -394,6 +396,8 @@ def run_chat_turn(
     chat_placeholders: list,
     debug_placeholder,
     mobile_debug_placeholder,
+    desktop_trace_placeholder,
+    mobile_trace_placeholder,
 ):
     st.session_state.messages.append({"role": "user", "content": prompt})
     update_chat_placeholders(*chat_placeholders)
@@ -407,13 +411,14 @@ def run_chat_turn(
     update_debug_panels(
         debug_placeholder,
         mobile_debug_placeholder,
+        desktop_trace_placeholder,
+        mobile_trace_placeholder,
         visited,
         trace_steps,
         running_state,
         "Starting graph...",
         active_node,
     )
-    scroll_to_visit_order(highlight=True)
 
     for event in stream_agent(prompt, thread_id=str(uuid.uuid4())):
         if event["type"] == "node_start":
@@ -423,6 +428,8 @@ def run_chat_turn(
             update_debug_panels(
                 debug_placeholder,
                 mobile_debug_placeholder,
+                desktop_trace_placeholder,
+                mobile_trace_placeholder,
                 visited,
                 trace_steps,
                 running_state,
@@ -442,14 +449,14 @@ def run_chat_turn(
             update_debug_panels(
                 debug_placeholder,
                 mobile_debug_placeholder,
+                desktop_trace_placeholder,
+                mobile_trace_placeholder,
                 visited,
                 trace_steps,
                 running_state,
                 status,
                 active_node,
             )
-            if len(visited) == 1:
-                scroll_to_visit_order(highlight=True)
 
         elif event["type"] == "complete":
             running_state = event["state"]
@@ -460,6 +467,8 @@ def run_chat_turn(
             update_debug_panels(
                 debug_placeholder,
                 mobile_debug_placeholder,
+                desktop_trace_placeholder,
+                mobile_trace_placeholder,
                 visited,
                 trace_steps,
                 running_state,
@@ -511,15 +520,25 @@ def render_chat_page():
             st.info("Try: *I keep forgetting to drink water during the day*")
 
     with debug_col:
+        st.markdown('<div class="under-hood-highlight">', unsafe_allow_html=True)
         debug_placeholder = st.empty()
         with debug_placeholder.container():
-            render_debug_panel(
-                dbg["visited"],
+            render_debug_summary(
                 dbg["trace_steps"],
-                dbg["active_node"],
                 dbg["running_state"],
                 dbg["status"],
             )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown('<div class="desktop-trace">', unsafe_allow_html=True)
+    desktop_trace_placeholder = st.empty()
+    with desktop_trace_placeholder.container():
+        render_step_trace(
+            dbg["trace_steps"],
+            dbg["active_node"],
+            dbg["status"],
+        )
+    st.markdown("</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown('<div class="mobile-hood">', unsafe_allow_html=True)
@@ -531,18 +550,26 @@ def render_chat_page():
         st.info("Try: *I keep forgetting to drink water during the day*")
 
     with st.expander(
-        "Under the Hood (tap to open)",
+        "Under the Hood",
         expanded=st.session_state.mobile_hood_open,
     ):
         mobile_debug_placeholder = st.empty()
         with mobile_debug_placeholder.container():
-            render_debug_panel(
-                dbg["visited"],
+            render_debug_summary(
                 dbg["trace_steps"],
-                dbg["active_node"],
                 dbg["running_state"],
                 dbg["status"],
             )
+
+    st.markdown('<div class="mobile-trace">', unsafe_allow_html=True)
+    mobile_trace_placeholder = st.empty()
+    with mobile_trace_placeholder.container():
+        render_step_trace(
+            dbg["trace_steps"],
+            dbg["active_node"],
+            dbg["status"],
+        )
+    st.markdown("</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
     if session_limit_reached():
@@ -578,6 +605,8 @@ def render_chat_page():
             [desktop_chat_placeholder, mobile_chat_placeholder],
             debug_placeholder,
             mobile_debug_placeholder,
+            desktop_trace_placeholder,
+            mobile_trace_placeholder,
         )
         st.rerun()
 
@@ -613,16 +642,8 @@ def main():
                 )
 
             st.divider()
-            render_session_token_budget()
-
-            if st.session_state.runs:
-                st.divider()
-                st.markdown("**Token breakdown**")
-                chat_tokens = get_session_token_usage()
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Input", f"{chat_tokens['input_tokens']}")
-                c2.metric("Output", f"{chat_tokens['output_tokens']}")
-                c3.metric("Total", f"{chat_tokens['total_tokens']}")
+            render_session_limit_warning()
+            render_compact_token_breakdown()
 
             if st.session_state.runs:
                 st.divider()
@@ -635,8 +656,8 @@ def main():
                 )
 
         if page == "The Story Behind It":
-            st.markdown("Why this app was built and how LangGraph orchestration works.")
-            st.markdown("Switch to **Chat** when you're ready to try it.")
+            st.markdown("See how **LangGraph orchestration** works.")
+            st.markdown("Switch to **Chat** when you're ready to experiment.")
 
         render_sidebar_erase_button()
 

@@ -9,50 +9,50 @@ GRAPH_IMAGE = Path(__file__).parent / "graph.png"
 
 def render_beginner_guide():
     st.title("The Story Behind It")
+    st.markdown("See how **LangGraph orchestration** works.")
+
     st.markdown(
-        "Why this app exists, what problem it solves, and how LangGraph + AI work together."
+        """
+### Why this exists
+
+The goal is to understand:
+
+- how graphs connect nodes and edges
+- how shared state flows between steps
+- how AI can **orchestrate** which node runs next
+
+A simple life-problem solver makes the graph easy to follow step by step.
+        """
     )
 
     st.markdown(
         """
-### The problem
+### The mental model
 
-Most chatbots feel like a black box. You type a question, wait, and get an answer —
-but you never see *how* the AI got there.
-
-I built this app to **learn LangGraph** in a hands-on way: a simple life-problem solver
-where you can watch every step live.
-        """
-    )
-
-    st.markdown(
-        """
-### The idea
-
-Instead of one giant AI prompt doing everything, imagine a **small team**:
+Instead of one giant AI prompt, imagine a **small team**:
 
 - A **manager** (`router`) who decides what happens next
-- **Specialists** (`brainstorm`, `action_plan`, `reflect`, …) who each do one job well
+- **Specialists** (`brainstorm`, `action_plan`, `reflect`, …) who each do one job
 - A shared **whiteboard** (`state`) everyone reads and updates
 
-That team is LangGraph. The intelligence inside each person is AI.
+LangGraph is the factory floor plan. AI is the brain inside each worker — and the manager.
         """
     )
 
     st.info(
         "**In one sentence:** LangGraph runs the workflow; AI does the work inside each step "
-        "and helps the manager choose the next step."
+        "and helps pick the next step from allowed routes."
     )
 
     st.header("How a message travels")
 
     st.markdown(
         """
-1. You describe a small everyday problem in **Chat**
-2. Your words land on the whiteboard as `state["problem"]`
-3. The **router** looks at the board and picks the next move
-4. A **worker node** does its job and updates the board
-5. Back to the router — repeat until **finalize** writes your answer
+1. You type a problem in **Chat**
+2. It becomes `state["problem"]` on the shared whiteboard
+3. The **router** picks the next node
+4. A **worker** runs, then updates state
+5. Repeat until **finalize** writes the answer
 
 ```text
 START → router → worker → router → worker → ... → finalize → END
@@ -63,7 +63,7 @@ START → router → worker → router → worker → ... → finalize → END
     if GRAPH_IMAGE.exists():
         st.image(
             str(GRAPH_IMAGE),
-            caption="The graph — solid lines are fixed; dashed lines are where AI chooses the path",
+            caption="The graph — solid lines are fixed; dashed lines are AI-chosen paths",
         )
 
     st.header("Why AI shows up twice")
@@ -88,10 +88,10 @@ Each node asks AI for **one focused task**:
         st.subheader("As the manager")
         st.markdown(
             """
-The **router** asks AI: *given what we know so far, what should we do next?*
+The **router** asks AI: *given the current state, what should we do next?*
 
 It only chooses from **allowed routes** — never random jumps.
-That is the orchestration pattern LangGraph is great at teaching.
+That is the orchestration pattern this sandbox is built to teach.
             """
         )
 
@@ -102,23 +102,20 @@ That is the orchestration pattern LangGraph is great at teaching.
         language=None,
     )
     st.caption(
-        "You see one friendly answer in chat. Under the Hood shows the full journey."
+        "One answer in chat — but many steps you can inspect in the trace below."
     )
 
-    st.header("Why transparency matters")
+    st.header("What to watch while learning")
 
     st.markdown(
         """
-This app is a **learning lab**, not just a chatbot.
+Use the UI as a **debug window**:
 
-The right panel shows:
-
-- **Visit order** — which nodes ran, in sequence
+- **Under the Hood** — token usage and live shared state
+- **Step-by-step trace** — each node's input/output JSON
 - **AI decided the flow** — when the router chose the path
-- **Input / output JSON** — what each node read and wrote
-- **Token usage** — cost of each step and the whole session (10K limit)
 
-You are not meant to trust the answer blindly. You are meant to **see the machinery**.
+The 10K session token cap keeps experiments cheap while you iterate.
         """
     )
 
@@ -130,20 +127,19 @@ You are not meant to trust the answer blindly. You are meant to **see the machin
             unsafe_allow_html=True,
         )
 
-    st.header("Under the hood in code")
+    st.header("Files to explore")
     st.markdown(
         """
-| File | Role in the story |
-|------|-------------------|
-| `state.py` | The shared whiteboard |
-| `nodes.py` | The specialists |
-| `router.py` | The manager + routing rules |
-| `graph.py` | The factory floor plan |
-| `app.py` | What you see — chat + live trace |
+| File | What to learn from it |
+|------|------------------------|
+| `state.py` | Shared memory between nodes |
+| `nodes.py` | Worker nodes (AI tasks) |
+| `router.py` | Orchestrator + allowed routes |
+| `graph.py` | Wiring nodes and conditional edges |
+| `app.py` | Chat UI + live transparency |
         """
     )
 
     st.success(
-        "Ready? Go to **Chat**, ask something like *I keep forgetting to drink water*, "
-        "and watch the story unfold on the right."
+        "Go to **Chat**, try a small life problem, and watch the graph work in real time."
     )
