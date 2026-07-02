@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 
 from beginner_guide import render_beginner_guide
 from graph import stream_agent
+from langgraph.errors import GraphRecursionError
 from router import NODE_COLORS, NODE_LABELS
 from ui_styles import inject_layout_css
 
@@ -422,56 +423,73 @@ def run_chat_turn(
     )
     time.sleep(0.3)
 
-    for event in stream_agent(prompt, thread_id=str(uuid.uuid4())):
-        if event["type"] == "node_start":
-            active_node = event["node"]
-            running_state = event["state"]
-            status = f"Running {NODE_LABELS.get(active_node, active_node)}…"
-            update_debug_panel(
-                debug_placeholder,
-                visited,
-                trace_steps,
-                running_state,
-                status,
-                active_node,
-            )
-            time.sleep(STEP_RUNNING_PAUSE_SEC)
+    graph_error = False
+    try:
+        for event in stream_agent(prompt, thread_id=str(uuid.uuid4())):
+            if event["type"] == "node_start":
+                active_node = event["node"]
+                running_state = event["state"]
+                status = f"Running {NODE_LABELS.get(active_node, active_node)}…"
+                update_debug_panel(
+                    debug_placeholder,
+                    visited,
+                    trace_steps,
+                    running_state,
+                    status,
+                    active_node,
+                )
+                time.sleep(STEP_RUNNING_PAUSE_SEC)
 
-        elif event["type"] == "node_end":
-            visited = event.get("visited", visited)
-            running_state = event["state"]
-            trace = event.get("trace")
-            if trace:
-                trace_steps.append(trace)
+            elif event["type"] == "node_end":
+                visited = event.get("visited", visited)
+                running_state = event["state"]
+                trace = event.get("trace")
+                if trace:
+                    trace_steps.append(trace)
 
-            status = f"Finished {NODE_LABELS.get(event['node'], event['node'])}"
-            update_debug_panel(
-                debug_placeholder,
-                visited,
-                trace_steps,
-                running_state,
-                status,
-                None,
-            )
-            time.sleep(STEP_FINISHED_PAUSE_SEC)
-            active_node = None
+                status = f"Finished {NODE_LABELS.get(event['node'], event['node'])}"
+                update_debug_panel(
+                    debug_placeholder,
+                    visited,
+                    trace_steps,
+                    running_state,
+                    status,
+                    None,
+                )
+                time.sleep(STEP_FINISHED_PAUSE_SEC)
+                active_node = None
 
-        elif event["type"] == "complete":
-            running_state = event["state"]
-            visited = event.get("visited", visited)
-            trace_steps = running_state.get("execution_trace", trace_steps)
-            final_answer = running_state.get("final_answer", "")
+            elif event["type"] == "complete":
+                running_state = event["state"]
+                visited = event.get("visited", visited)
+                trace_steps = running_state.get("execution_trace", trace_steps)
+                final_answer = running_state.get("final_answer", "")
 
-            update_debug_panel(
-                debug_placeholder,
-                visited,
-                trace_steps,
-                running_state,
-                "Graph complete",
-                None,
-            )
+                update_debug_panel(
+                    debug_placeholder,
+                    visited,
+                    trace_steps,
+                    running_state,
+                    "Graph complete",
+                    None,
+                )
+    except GraphRecursionError:
+        graph_error = True
+        update_debug_panel(
+            debug_placeholder,
+            visited,
+            trace_steps,
+            running_state,
+            "Stopped — workflow step limit reached",
+            None,
+        )
 
-    if not final_answer:
+    if graph_error:
+        final_answer = (
+            "Sorry — the workflow hit its step limit before finishing. "
+            "Try a shorter or clearer problem, or erase the session and try again."
+        )
+    elif not final_answer:
         final_answer = "Sorry — the graph did not produce a final answer."
 
     st.session_state.messages.append({"role": "assistant", "content": final_answer})

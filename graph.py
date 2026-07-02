@@ -1,3 +1,4 @@
+import os
 import uuid
 from collections.abc import Iterator
 from typing import Any
@@ -16,7 +17,7 @@ from nodes import (
 from router import router_node
 from state import AgentState, Route
 
-MAX_STEPS = 12
+MAX_STEPS = int(os.getenv("GRAPH_RECURSION_LIMIT", "24"))
 _checkpointer = MemorySaver()
 _compiled_graph = None
 

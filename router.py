@@ -45,25 +45,33 @@ def create_router():
     return ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
 
+def node_was_executed(state: AgentState, node_name: str) -> bool:
+    return any(
+        step.get("node") == node_name
+        for step in state.get("execution_trace", [])
+    )
+
+
 def allowed_routes(state: AgentState) -> list[Route]:
     """Compute which edges are valid from the current node."""
     if state.get("final_answer"):
         return ["end"]
 
-    routes: list[Route] = []
-
     if not state.get("brainstormed_ideas"):
-        routes.extend(["clarify", "brainstorm"])
-    elif len(state.get("brainstormed_ideas", [])) >= 4 and not state.get("prioritized_ideas"):
-        routes.extend(["prioritize", "action_plan"])
-    elif not state.get("action_steps"):
-        routes.append("action_plan")
-    elif not state.get("reflected"):
-        routes.extend(["reflect", "action_plan"])
-    else:
-        routes.append("finalize")
+        routes: list[Route] = ["brainstorm"]
+        if not node_was_executed(state, "clarify"):
+            routes.append("clarify")
+        return routes
 
-    return routes
+    if state.get("action_steps"):
+        if state.get("reflected"):
+            return ["finalize"]
+        return ["reflect"]
+
+    if len(state.get("brainstormed_ideas", [])) >= 4 and not state.get("prioritized_ideas"):
+        return ["prioritize", "action_plan"]
+
+    return ["action_plan"]
 
 
 def decide_next_route(state: AgentState, llm=None) -> tuple[Route, dict[str, int]]:

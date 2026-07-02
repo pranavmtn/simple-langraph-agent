@@ -3,7 +3,7 @@ import sys
 
 from dotenv import load_dotenv
 
-from graph import build_graph, make_initial_state
+from graph import MAX_STEPS, build_graph, make_initial_state
 
 load_dotenv()
 
@@ -26,7 +26,7 @@ def run_agent_with_trace(problem: str):
     app = build_graph()
     initial = make_initial_state(problem)
 
-    config = {"configurable": {"thread_id": "demo"}, "recursion_limit": 12}
+    config = {"configurable": {"thread_id": "demo"}, "recursion_limit": MAX_STEPS}
     visited: list[str] = []
 
     for event in app.stream(initial, config=config):
