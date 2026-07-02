@@ -5,6 +5,7 @@ import uuid
 from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
 from beginner_guide import render_beginner_guide
@@ -46,6 +47,8 @@ def init_session():
             "status": "Idle — waiting for your message.",
             "active_node": None,
         }
+    if "scroll_to_answer" not in st.session_state:
+        st.session_state.scroll_to_answer = False
 
 def badge(node: str, active: bool = False) -> str:
     color = NODE_COLORS.get(node, "#94a3b8")
@@ -71,6 +74,26 @@ def render_page_header(title: str, subtitle: str):
 
 def render_under_hood_divider():
     st.markdown('<hr class="under-hood-divider">', unsafe_allow_html=True)
+
+
+def scroll_to_chat_answer():
+    """Smoothly scroll the page to the chat reply after a run completes."""
+    components.html(
+        """
+        <script>
+            (function () {
+                const doc = window.parent.document;
+                const anchor = doc.getElementById("chat-answer-anchor");
+                const target = anchor || doc.querySelector("section.main");
+                if (!target) return;
+                setTimeout(function () {
+                    target.scrollIntoView({ behavior: "smooth", block: "start" });
+                }, 120);
+            })();
+        </script>
+        """,
+        height=0,
+    )
 
 
 def render_running_banner(status: str):
@@ -167,6 +190,7 @@ def session_depth_label() -> str:
 def erase_session():
     st.session_state.messages = []
     st.session_state.runs = []
+    st.session_state.scroll_to_answer = False
     st.session_state.debug = {
         "visited": [],
         "trace_steps": [],
@@ -293,6 +317,11 @@ def render_debug_summary(
         "reflected": running_state.get("reflected", False),
         "final_answer": running_state.get("final_answer", ""),
     }
+    if status == "Graph complete":
+        st.markdown(
+            '<div class="state-snapshot-complete-marker" aria-hidden="true"></div>',
+            unsafe_allow_html=True,
+        )
     render_json_expander(
         "Current state snapshot",
         state_view,
@@ -459,6 +488,8 @@ def run_chat_turn(
     with chat_placeholder.container():
         render_messages()
 
+    st.session_state.scroll_to_answer = True
+
 
 def render_messages():
     for msg in st.session_state.messages:
@@ -479,6 +510,10 @@ def render_chat_page():
 
     with chat_col:
         st.subheader("Chat")
+        st.markdown(
+            '<div id="chat-answer-anchor" aria-hidden="true"></div>',
+            unsafe_allow_html=True,
+        )
         chat_placeholder = st.empty()
         with chat_placeholder.container():
             render_messages()
@@ -530,6 +565,10 @@ def render_chat_page():
             debug_placeholder,
         )
         st.rerun()
+
+    if st.session_state.scroll_to_answer:
+        st.session_state.scroll_to_answer = False
+        scroll_to_chat_answer()
 
 
 def main():
