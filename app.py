@@ -34,30 +34,40 @@ st.markdown(
     <style>
     .node-badge {
         display: inline-block;
-        padding: 4px 10px;
+        padding: 3px 10px;
         border-radius: 999px;
-        color: white;
+        background: transparent;
+        border: 1.5px solid;
         font-weight: 600;
-        font-size: 0.85rem;
+        font-size: 0.82rem;
         margin-right: 6px;
-        margin-bottom: 4px;
         white-space: nowrap;
     }
-    .trace-card {
-        border-left: 4px solid #6366f1;
-        padding: 0.75rem 1rem;
-        margin-bottom: 0.75rem;
-        background: #f8fafc;
-        border-radius: 0 8px 8px 0;
+    .trace-step-header {
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+        margin-bottom: 0.35rem;
+        padding: 0.1rem 0;
     }
-    .ai-flow-banner {
-        background: #fff7ed;
-        border: 1px solid #fdba74;
-        color: #9a3412;
-        padding: 0.55rem 0.8rem;
-        border-radius: 8px;
-        font-weight: 600;
-        margin: 0.4rem 0 0.8rem 0;
+    .trace-step-num {
+        color: #b8c5d6;
+        font-size: 0.82rem;
+        font-weight: 500;
+    }
+    .ai-flow-line {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0.35rem;
+        margin: 0.2rem 0 0.45rem 0;
+        font-size: 0.86rem;
+        color: #b8c5d6;
+        font-weight: 500;
+    }
+    .ai-flow-arrow {
+        color: #d4dde8;
+        font-weight: 400;
     }
     .visit-flow-wrap {
         display: flex;
@@ -78,32 +88,6 @@ st.markdown(
         0%, 100% { opacity: 1; }
         50% { opacity: 0.45; }
     }
-    .desktop-hood {
-        display: block;
-    }
-    .mobile-hood {
-        display: none;
-    }
-    .desktop-trace {
-        display: block;
-    }
-    .mobile-trace {
-        display: none;
-    }
-    @media (max-width: 900px) {
-        .desktop-hood {
-            display: none;
-        }
-        .mobile-hood {
-            display: block;
-        }
-        .desktop-trace {
-            display: none;
-        }
-        .mobile-trace {
-            display: block;
-        }
-    }
     .sidebar-erase-wrap {
         margin-top: 1.5rem;
         padding-top: 1rem;
@@ -115,31 +99,17 @@ st.markdown(
         line-height: 1.4;
         margin: 0;
     }
-    .under-hood-highlight {
-        background: #f0fdf4;
-        border: 1px solid #dcfce7;
-        border-radius: 10px;
-        padding: 0.65rem 0.75rem;
+    .under-hood-roof-wrap {
+        width: 100%;
+        max-width: 9.5rem;
+        margin: 0 auto 0.1rem auto;
+        line-height: 0;
+        pointer-events: none;
     }
-    .mobile-hood div[data-testid="stExpander"] {
-        background: #f0fdf4;
-        border: 1px solid #dcfce7;
-        border-radius: 10px;
-        overflow: hidden;
-    }
-    .mobile-hood div[data-testid="stExpander"] details {
-        background: #f0fdf4;
-        border: none;
-    }
-    .mobile-hood div[data-testid="stExpander"] summary {
-        background: #f0fdf4;
-        border-radius: 10px;
-        font-weight: 600;
-    }
-    .mobile-hood div[data-testid="stExpander"] [data-testid="stExpanderDetails"] {
-        background: #f7fef9;
-        border-top: 1px solid #dcfce7;
-        padding-top: 0.5rem;
+    .under-hood-roof {
+        width: 100%;
+        height: 14px;
+        display: block;
     }
     </style>
     """,
@@ -160,16 +130,35 @@ def init_session():
             "status": "Idle — waiting for your message.",
             "active_node": None,
         }
-    if "mobile_hood_open" not in st.session_state:
-        st.session_state.mobile_hood_open = False
-
 
 def badge(node: str, active: bool = False) -> str:
-    color = NODE_COLORS.get(node, "#64748b")
+    color = NODE_COLORS.get(node, "#94a3b8")
     pulse = " live-pulse" if active else ""
     label = NODE_LABELS.get(node, node)
     return (
-        f'<span class="node-badge{pulse}" style="background:{color};">{label}</span>'
+        f'<span class="node-badge{pulse}" '
+        f'style="color:{color};border-color:{color};">{label}</span>'
+    )
+
+
+def render_under_hood_roof():
+    """Small peaked roof SVG above the Under the Hood section."""
+    st.markdown(
+        """
+        <div class="under-hood-roof-wrap" aria-hidden="true">
+          <svg class="under-hood-roof" viewBox="0 0 120 16" xmlns="http://www.w3.org/2000/svg">
+            <path
+              d="M0 16 L60 1 L120 16 Z"
+              fill="#f8fafc"
+              stroke="#94a3b8"
+              stroke-width="1"
+              stroke-linejoin="round"
+            />
+            <path d="M60 1 L60 16" stroke="#cbd5e1" stroke-width="0.75"/>
+          </svg>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
 
@@ -218,7 +207,6 @@ def erase_session():
         "status": "Idle — waiting for your message.",
         "active_node": None,
     }
-    st.session_state.mobile_hood_open = False
 
 
 def render_sidebar_erase_button():
@@ -255,10 +243,10 @@ def render_compact_token_breakdown():
 
 def render_trace_step(step: dict, step_num: int, active: bool = False):
     node = step.get("node", "unknown")
-    color = NODE_COLORS.get(node, "#64748b")
     st.markdown(
-        f'<div class="trace-card" style="border-left-color:{color};">'
-        f"{badge(node, active=active)} <strong>Step {step_num}</strong>"
+        f'<div class="trace-step-header">'
+        f"{badge(node, active=active)}"
+        f'<span class="trace-step-num">Step {step_num}</span>'
         f"</div>",
         unsafe_allow_html=True,
     )
@@ -270,9 +258,15 @@ def render_trace_step(step: dict, step_num: int, active: bool = False):
         ai = output.get("ai_decision", False)
 
         if ai:
+            chosen_color = NODE_COLORS.get(chosen, "#94a3b8")
+            chosen_label = NODE_LABELS.get(chosen, chosen)
             st.markdown(
-                '<div class="ai-flow-banner">AI decided the flow → '
-                f'<code>{chosen}</code></div>',
+                '<div class="ai-flow-line">'
+                "<span>AI decided the flow</span>"
+                '<span class="ai-flow-arrow">→</span>'
+                f'<span class="node-badge" style="color:{chosen_color};'
+                f'border-color:{chosen_color};">{chosen_label}</span>'
+                "</div>",
                 unsafe_allow_html=True,
             )
 
@@ -300,8 +294,9 @@ def render_debug_summary(
     trace_steps: list[dict],
     running_state: dict,
     status: str,
+    active_node: str | None = None,
 ):
-    """Compact right-column panel: tokens + live state only."""
+    """Under the Hood panel: tokens, live state, and step-by-step trace."""
     st.subheader("Under the Hood")
     st.caption(status)
 
@@ -332,13 +327,15 @@ def render_debug_summary(
         expanded=status.startswith(("Starting", "Running")),
     )
 
+    render_step_trace(trace_steps, active_node, status)
+
 
 def render_step_trace(
     trace_steps: list[dict],
     active_node: str | None,
     status: str,
 ):
-    """Full-width step-by-step trace shown below the chat area."""
+    """Step-by-step trace inside the Under the Hood panel."""
     st.markdown("**Step-by-step trace**")
     if not trace_steps:
         st.info("Send a message to watch nodes run live.")
@@ -363,17 +360,8 @@ def save_debug(visited, trace_steps, running_state, status, active_node=None):
     }
 
 
-def update_chat_placeholders(*placeholders):
-    for placeholder in placeholders:
-        with placeholder.container():
-            render_messages()
-
-
-def update_debug_panels(
+def update_debug_panel(
     debug_placeholder,
-    mobile_debug_placeholder,
-    desktop_trace_placeholder,
-    mobile_trace_placeholder,
     visited,
     trace_steps,
     running_state,
@@ -382,25 +370,19 @@ def update_debug_panels(
 ):
     save_debug(visited, trace_steps, running_state, status, active_node)
     with debug_placeholder.container():
-        render_debug_summary(trace_steps, running_state, status)
-    with mobile_debug_placeholder.container():
-        render_debug_summary(trace_steps, running_state, status)
-    with desktop_trace_placeholder.container():
-        render_step_trace(trace_steps, active_node, status)
-    with mobile_trace_placeholder.container():
-        render_step_trace(trace_steps, active_node, status)
+        render_debug_summary(
+            trace_steps, running_state, status, active_node=active_node
+        )
 
 
 def run_chat_turn(
     prompt: str,
-    chat_placeholders: list,
+    chat_placeholder,
     debug_placeholder,
-    mobile_debug_placeholder,
-    desktop_trace_placeholder,
-    mobile_trace_placeholder,
 ):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    update_chat_placeholders(*chat_placeholders)
+    with chat_placeholder.container():
+        render_messages()
 
     visited: list[str] = []
     trace_steps: list[dict] = []
@@ -408,11 +390,8 @@ def run_chat_turn(
     active_node: str | None = None
     final_answer = ""
 
-    update_debug_panels(
+    update_debug_panel(
         debug_placeholder,
-        mobile_debug_placeholder,
-        desktop_trace_placeholder,
-        mobile_trace_placeholder,
         visited,
         trace_steps,
         running_state,
@@ -425,11 +404,8 @@ def run_chat_turn(
             active_node = event["node"]
             running_state = event["state"]
             status = f"Running `{active_node}`..."
-            update_debug_panels(
+            update_debug_panel(
                 debug_placeholder,
-                mobile_debug_placeholder,
-                desktop_trace_placeholder,
-                mobile_trace_placeholder,
                 visited,
                 trace_steps,
                 running_state,
@@ -446,11 +422,8 @@ def run_chat_turn(
                 trace_steps.append(trace)
 
             status = f"Finished `{event['node']}`"
-            update_debug_panels(
+            update_debug_panel(
                 debug_placeholder,
-                mobile_debug_placeholder,
-                desktop_trace_placeholder,
-                mobile_trace_placeholder,
                 visited,
                 trace_steps,
                 running_state,
@@ -464,11 +437,8 @@ def run_chat_turn(
             trace_steps = running_state.get("execution_trace", trace_steps)
             final_answer = running_state.get("final_answer", "")
 
-            update_debug_panels(
+            update_debug_panel(
                 debug_placeholder,
-                mobile_debug_placeholder,
-                desktop_trace_placeholder,
-                mobile_trace_placeholder,
                 visited,
                 trace_steps,
                 running_state,
@@ -490,7 +460,8 @@ def run_chat_turn(
         }
     )
 
-    update_chat_placeholders(*chat_placeholders)
+    with chat_placeholder.container():
+        render_messages()
 
 
 def render_messages():
@@ -508,69 +479,26 @@ def render_chat_page():
 
     dbg = st.session_state.debug
 
-    st.markdown('<div class="desktop-hood">', unsafe_allow_html=True)
     chat_col, debug_col = st.columns([1, 1], gap="large")
 
     with chat_col:
         st.subheader("Chat")
-        desktop_chat_placeholder = st.empty()
-        with desktop_chat_placeholder.container():
+        chat_placeholder = st.empty()
+        with chat_placeholder.container():
             render_messages()
         if not st.session_state.messages:
             st.info("Try: *I keep forgetting to drink water during the day*")
 
     with debug_col:
-        st.markdown('<div class="under-hood-highlight">', unsafe_allow_html=True)
+        render_under_hood_roof()
         debug_placeholder = st.empty()
         with debug_placeholder.container():
             render_debug_summary(
                 dbg["trace_steps"],
                 dbg["running_state"],
                 dbg["status"],
+                active_node=dbg["active_node"],
             )
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    st.markdown('<div class="desktop-trace">', unsafe_allow_html=True)
-    desktop_trace_placeholder = st.empty()
-    with desktop_trace_placeholder.container():
-        render_step_trace(
-            dbg["trace_steps"],
-            dbg["active_node"],
-            dbg["status"],
-        )
-    st.markdown("</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    st.markdown('<div class="mobile-hood">', unsafe_allow_html=True)
-    st.subheader("Chat")
-    mobile_chat_placeholder = st.empty()
-    with mobile_chat_placeholder.container():
-        render_messages()
-    if not st.session_state.messages:
-        st.info("Try: *I keep forgetting to drink water during the day*")
-
-    with st.expander(
-        "Under the Hood",
-        expanded=st.session_state.mobile_hood_open,
-    ):
-        mobile_debug_placeholder = st.empty()
-        with mobile_debug_placeholder.container():
-            render_debug_summary(
-                dbg["trace_steps"],
-                dbg["running_state"],
-                dbg["status"],
-            )
-
-    st.markdown('<div class="mobile-trace">', unsafe_allow_html=True)
-    mobile_trace_placeholder = st.empty()
-    with mobile_trace_placeholder.container():
-        render_step_trace(
-            dbg["trace_steps"],
-            dbg["active_node"],
-            dbg["status"],
-        )
-    st.markdown("</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
 
     if session_limit_reached():
         st.error(
@@ -595,18 +523,15 @@ def render_chat_page():
                     ),
                 }
             )
-            update_chat_placeholders(desktop_chat_placeholder, mobile_chat_placeholder)
+            with chat_placeholder.container():
+                render_messages()
             st.rerun()
             return
 
-        st.session_state.mobile_hood_open = True
         run_chat_turn(
             prompt,
-            [desktop_chat_placeholder, mobile_chat_placeholder],
+            chat_placeholder,
             debug_placeholder,
-            mobile_debug_placeholder,
-            desktop_trace_placeholder,
-            mobile_trace_placeholder,
         )
         st.rerun()
 

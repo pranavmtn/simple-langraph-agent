@@ -102,7 +102,7 @@ That is the orchestration pattern this sandbox is built to teach.
         language=None,
     )
     st.caption(
-        "One answer in chat — but many steps you can inspect in the trace below."
+        "One answer in chat — but many steps you can inspect in Under the Hood."
     )
 
     st.header("What to watch while learning")
