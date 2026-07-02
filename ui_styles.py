@@ -170,11 +170,21 @@ div[data-testid="column"]:has(.under-hood-complete-marker) {
 .trace-step-marker.trace-step-done + div[data-testid="stExpander"] {
     border: 1px solid #d9f99d;
     border-radius: 10px;
-    background-color: #fefce8;
-    transition: border-color 0.35s ease, background-color 0.35s ease;
+    background-color: transparent;
+    overflow: hidden;
+    transition: border-color 0.35s ease;
 }
 .trace-step-marker.trace-step-done + div[data-testid="stExpander"] summary {
+    background: #9acd324a !important;
     color: #4d7c0f;
+    border-radius: 10px;
+    transition: background 0.35s ease, color 0.35s ease;
+}
+.trace-step-marker.trace-step-done + div[data-testid="stExpander"] details[open] > summary {
+    border-radius: 10px 10px 0 0;
+}
+.trace-step-marker.trace-step-done + div[data-testid="stExpander"] [data-testid="stExpanderDetails"] {
+    background-color: #ffffff;
 }
 .state-snapshot-complete-marker + div[data-testid="stExpander"] {
     border: 1px solid #bbf7d0;
