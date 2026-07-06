@@ -120,10 +120,44 @@ div[data-testid="column"]:has(.under-hood-complete-marker) {
     border-top: 1px solid #e2e8f0;
 }
 .sidebar-token-line {
-    font-size: 0.78rem;
+    font-size: 0.72rem;
     color: #64748b;
-    line-height: 1.4;
+    line-height: 1.35;
     margin: 0;
+}
+.run-token-line {
+    font-size: 0.74rem;
+    color: #64748b;
+    line-height: 1.35;
+    margin: -0.15rem 0 0.25rem 0;
+    white-space: nowrap;
+}
+.run-token-line b,
+.sidebar-token-line b,
+.trace-token-line b {
+    color: #475569;
+    font-weight: 600;
+}
+.trace-token-line {
+    font-size: 0.7rem;
+    color: #94a3b8;
+    line-height: 1.3;
+    margin: 0.1rem 0 0.35rem 0;
+    white-space: nowrap;
+}
+@media (max-width: 768px) {
+    .run-token-line,
+    .trace-token-line,
+    .sidebar-token-line {
+        font-size: 0.68rem;
+        white-space: normal;
+    }
+}
+.rate-limit-line {
+    font-size: 0.74rem;
+    color: #b45309;
+    line-height: 1.35;
+    margin: 0.35rem 0 0;
 }
 .graph-running-banner {
     display: flex;

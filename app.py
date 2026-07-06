@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from beginner_guide import render_beginner_guide
 from graph import stream_agent
 from langgraph.errors import GraphRecursionError
+from rate_limit import check_rate_limit, get_client_ip, record_request
 from router import NODE_COLORS, NODE_LABELS
 from ui_styles import inject_layout_css
 
@@ -217,6 +218,16 @@ def render_session_limit_warning():
         st.warning("Pipeline headroom is getting low — consider erasing the session soon.")
 
 
+def render_rate_limit_warning():
+    """Show sidebar warning when IP rate limit cooldown is active."""
+    result = check_rate_limit(get_client_ip())
+    if not result.allowed:
+        st.markdown(
+            f'<p class="rate-limit-line">{result.message}</p>',
+            unsafe_allow_html=True,
+        )
+
+
 def render_compact_token_breakdown():
     """Small one-line token summary for the sidebar."""
     if not st.session_state.runs:
@@ -228,6 +239,19 @@ def render_compact_token_breakdown():
         f"In <b>{tokens['input_tokens']}</b> · "
         f"Out <b>{tokens['output_tokens']}</b> · "
         f"Total <b>{tokens['total_tokens']}</b>"
+        f"</p>",
+        unsafe_allow_html=True,
+    )
+
+
+def render_run_token_usage(run_tokens: dict[str, int]):
+    """Compact one-line token summary for Under the Hood."""
+    st.markdown(
+        f'<p class="run-token-line">'
+        f"Token usage (this run) · "
+        f"In <b>{run_tokens['input_tokens']}</b> · "
+        f"Out <b>{run_tokens['output_tokens']}</b> · "
+        f"Total <b>{run_tokens['total_tokens']}</b>"
         f"</p>",
         unsafe_allow_html=True,
     )
@@ -271,11 +295,13 @@ def render_trace_step(step: dict, step_num: int, active: bool = False):
         st.caption(f"Worker node: `{node}`")
 
     usage = step.get("token_usage", {}) or {}
-    st.caption(
-        "Tokens — "
-        f"input: `{usage.get('input_tokens', 0)}`, "
-        f"output: `{usage.get('output_tokens', 0)}`, "
-        f"total: `{usage.get('total_tokens', 0)}`"
+    st.markdown(
+        f'<p class="trace-token-line">'
+        f"Tokens · in <b>{usage.get('input_tokens', 0)}</b> · "
+        f"out <b>{usage.get('output_tokens', 0)}</b> · "
+        f"total <b>{usage.get('total_tokens', 0)}</b>"
+        f"</p>",
+        unsafe_allow_html=True,
     )
 
     render_json_expander("Input (state read)", step.get("input", {}))
@@ -300,12 +326,8 @@ def render_debug_summary(
     if not status.startswith(("Starting", "Running")):
         st.caption(status)
 
-    st.markdown("**Token usage (this run)**")
     run_tokens = summarize_tokens(trace_steps)
-    tcol1, tcol2, tcol3 = st.columns(3)
-    tcol1.metric("Input", f"{run_tokens['input_tokens']}")
-    tcol2.metric("Output", f"{run_tokens['output_tokens']}")
-    tcol3.metric("Total", f"{run_tokens['total_tokens']}")
+    render_run_token_usage(run_tokens)
 
     st.caption(f"Pipeline status · `{session_depth_label()}`")
 
@@ -555,11 +577,15 @@ def render_chat_page():
             "Use the erase button in the sidebar to start a new session."
         )
 
-    prompt = st.chat_input(
-        "Describe a simple life problem..."
-        if not session_limit_reached()
-        else "Session limit reached — erase session to continue"
-    )
+    rate_limit = check_rate_limit(get_client_ip())
+    if session_limit_reached():
+        chat_placeholder_text = "Session limit reached — erase session to continue"
+    elif not rate_limit.allowed:
+        chat_placeholder_text = f"Rate limited — wait {rate_limit.wait_seconds}s"
+    else:
+        chat_placeholder_text = "Describe a simple life problem..."
+
+    prompt = st.chat_input(chat_placeholder_text)
     if prompt:
         if session_limit_reached():
             st.session_state.messages.append({"role": "user", "content": prompt})
@@ -577,6 +603,19 @@ def render_chat_page():
             st.rerun()
             return
 
+        rate_limit = check_rate_limit(get_client_ip())
+        if not rate_limit.allowed:
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            st.session_state.messages.append(
+                {"role": "assistant", "content": rate_limit.message}
+            )
+            st.warning(rate_limit.message)
+            with chat_placeholder.container():
+                render_messages()
+            st.rerun()
+            return
+
+        record_request(get_client_ip())
         run_chat_turn(
             prompt,
             chat_placeholder,
@@ -622,6 +661,7 @@ def main():
 
             st.divider()
             render_session_limit_warning()
+            render_rate_limit_warning()
             render_compact_token_breakdown()
 
             if st.session_state.runs:
